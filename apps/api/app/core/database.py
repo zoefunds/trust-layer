@@ -23,5 +23,14 @@ async def get_db():
 
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all, checkfirst=True)
+    except Exception as e:
+        # Two workers may race to create enum types on first boot — safe to ignore
+        if "duplicate key" in str(e) or "already exists" in str(e):
+            logger.warning(f"init_db race condition (safe to ignore): {e}")
+        else:
+            raise
