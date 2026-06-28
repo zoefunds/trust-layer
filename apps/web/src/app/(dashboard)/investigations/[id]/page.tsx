@@ -8,16 +8,16 @@ import { VALIDATOR_LABELS } from "@/types";
 import type { SSEEvent, ValidatorType } from "@/types";
 import { getTrustColor, getRiskColor, getRiskLabel, formatDate } from "@/lib/utils";
 import {
-  Shield, GitBranch, Users, DollarSign, Globe, Lock,
-  FileText, Link2, Coins, MessageCircle, Package, Radio,
-  Briefcase, CheckCircle2, XCircle, Clock, AlertTriangle,
-  ArrowLeft,
+  Shield, GitBranch, DollarSign, Link2, Lock,
+  CheckCircle2, XCircle, Clock, AlertTriangle, ArrowLeft,
 } from "lucide-react";
 
 const VALIDATOR_ICONS: Record<ValidatorType, React.ElementType> = {
-  identity: Shield, founders: Users, funding: DollarSign, investors: Briefcase,
-  github: GitBranch, documentation: FileText, onchain: Link2, tokenomics: Coins,
-  security: Lock, community: MessageCircle, ecosystem: Globe, product: Package, media: Radio,
+  identity: Shield,
+  github: GitBranch,
+  funding: DollarSign,
+  onchain: Link2,
+  security: Lock,
 };
 
 const SCORE_CATEGORIES = [

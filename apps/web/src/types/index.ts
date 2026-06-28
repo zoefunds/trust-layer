@@ -15,18 +15,10 @@ export type InvestigationStatus = "pending" | "running" | "completed" | "failed"
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 export type ValidatorType =
   | "identity"
-  | "founders"
-  | "funding"
-  | "investors"
   | "github"
-  | "documentation"
+  | "funding"
   | "onchain"
-  | "tokenomics"
-  | "security"
-  | "community"
-  | "ecosystem"
-  | "product"
-  | "media";
+  | "security";
 
 export type ValidatorStatus = "pending" | "running" | "completed" | "failed";
 
@@ -112,32 +104,16 @@ export interface EvidenceItem {
 
 export const VALIDATOR_LABELS: Record<ValidatorType, string> = {
   identity: "Identity Verification",
-  founders: "Founder History",
-  funding: "Funding Verification",
-  investors: "Investor Reputation",
   github: "GitHub Activity",
-  documentation: "Documentation",
+  funding: "Funding Verification",
   onchain: "On-chain Activity",
-  tokenomics: "Tokenomics",
   security: "Security Audit",
-  community: "Community Health",
-  ecosystem: "Ecosystem Integrations",
-  product: "Product Verification",
-  media: "Media & Claims",
 };
 
 export const VALIDATOR_ICONS: Record<ValidatorType, string> = {
   identity: "shield",
-  founders: "users",
-  funding: "dollar-sign",
-  investors: "briefcase",
   github: "git-branch",
-  documentation: "file-text",
+  funding: "dollar-sign",
   onchain: "link",
-  tokenomics: "coins",
   security: "lock",
-  community: "message-circle",
-  ecosystem: "globe",
-  product: "package",
-  media: "radio",
 };
