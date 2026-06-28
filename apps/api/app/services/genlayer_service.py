@@ -41,31 +41,49 @@ async def _call_genlayer_contract(
     evidence: dict,
     investigation_id: str = "",
 ) -> AsyncIterator[dict]:
-    """Call the deployed GenLayer contract and stream updates."""
+    """
+    Call the deployed TrustLayer contract via GenLayer Studio JSON-RPC.
+    The genlayer Python SDK is not on PyPI so we call the REST API directly
+    using httpx.
+    """
+    import httpx
+
     try:
-        from genlayer import Client
-
-        client = Client(endpoint=settings.GENLAYER_STUDIO_URL)
         contract_address = settings.GENLAYER_CONTRACT_ADDRESS
+        studio_url = settings.GENLAYER_STUDIO_URL.rstrip("/")
 
-        # Signal running
+        # Signal all validators as running
         for vtype in VALIDATOR_TYPES:
             yield {"type": "validator_update", "validator_type": vtype, "status": "running"}
             await asyncio.sleep(0.1)
 
-        # Call the contract
-        result = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: client.call_contract(
-                contract_address=contract_address,
-                method="investigate",
-                args=[protocol_name, json.dumps(evidence), investigation_id],
-            ),
-        )
+        # GenLayer Studio JSON-RPC call — send_transaction for write methods
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "send_transaction",
+            "params": {
+                "to": contract_address,
+                "data": {
+                    "method": "investigate",
+                    "args": [protocol_name, json.dumps(evidence), investigation_id],
+                },
+            },
+        }
 
-        report_data = result if isinstance(result, dict) else json.loads(result)
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(f"{studio_url}/api", json=payload)
+            resp.raise_for_status()
+            rpc_result = resp.json()
 
-        # Stream individual validator completions
+        if "error" in rpc_result:
+            raise Exception(f"RPC error: {rpc_result['error']}")
+
+        # The result is the JSON string returned by investigate()
+        raw = rpc_result.get("result", "{}")
+        report_data = json.loads(raw) if isinstance(raw, str) else raw
+
+        # Stream individual validator completions from the report
         validators = report_data.get("validators", {})
         for vtype in VALIDATOR_TYPES:
             vdata = validators.get(vtype, {})
@@ -74,7 +92,7 @@ async def _call_genlayer_contract(
                 "validator_type": vtype,
                 "status": "completed",
                 "findings": vdata.get("findings", ""),
-                "confidence_score": vdata.get("confidence_score", 50.0),
+                "confidence_score": float(vdata.get("confidence", vdata.get("confidence_score", 50.0))),
             }
             await asyncio.sleep(0.2)
 
@@ -82,7 +100,7 @@ async def _call_genlayer_contract(
 
     except Exception as e:
         logger.error(f"GenLayer contract call failed: {e}")
-        # Fallback to simulation
+        # Fallback to simulation so the platform stays functional
         async for update in _simulate_investigation(protocol_name, evidence):
             yield update
 
