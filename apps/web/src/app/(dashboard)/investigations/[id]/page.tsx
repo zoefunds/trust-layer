@@ -134,13 +134,13 @@ export default function InvestigationPage() {
               <span style={{ fontSize: 13, fontWeight: 600 }}>Investigation Running</span>
               <span style={{ fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>GenLayer consensus active</span>
             </div>
-            <span style={{ fontSize: 12, fontFamily: "monospace", color: "#64748B" }}>{completedValidators}/{validators.length || 13}</span>
+            <span style={{ fontSize: 12, fontFamily: "monospace", color: "#64748B" }}>{completedValidators}/{validators.length || 5}</span>
           </div>
           <div style={{ height: 6, borderRadius: 99, background: "#1C2333", overflow: "hidden" }}>
             <div style={{ height: "100%", background: "linear-gradient(90deg, #2563EB, #10B981)", borderRadius: 99, width: `${progress}%`, transition: "width 0.5s ease" }} />
           </div>
           <div style={{ marginTop: 10, fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>
-            {progress.toFixed(0)}% complete · Running 13 independent AI validators…
+            {progress.toFixed(0)}% complete · Running 5 independent AI validators…
           </div>
         </div>
       )}
@@ -152,7 +152,7 @@ export default function InvestigationPage() {
         <div style={{ borderRadius: 16, border: "1px solid #1C2333", background: "#0D1117", overflow: "hidden", alignSelf: "start", position: "sticky", top: 84 }}>
           <div style={{ padding: "14px 18px", borderBottom: "1px solid #1C2333", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: "#94A3B8" }}>Validators</span>
-            <span style={{ fontSize: 11, fontFamily: "monospace", color: "#64748B" }}>{completedValidators}/{validators.length || 13}</span>
+            <span style={{ fontSize: 11, fontFamily: "monospace", color: "#64748B" }}>{completedValidators}/{validators.length || 5}</span>
           </div>
           <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
             {(validators.length > 0

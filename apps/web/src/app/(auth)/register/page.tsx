@@ -167,7 +167,7 @@ export default function RegisterPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {[
             { icon: Shield, label: "Wallet Auto-Generated", desc: "No MetaMask needed — we create one for you" },
-            { icon: Zap, label: "Instant Investigations", desc: "Results in under 60 seconds from 13 AI validators" },
+            { icon: Zap, label: "Instant Investigations", desc: "Results in under 60 seconds from 5 AI validators" },
             { icon: CheckCircle2, label: "GenLayer Consensus", desc: "Decentralized agreement prevents single points of failure" },
           ].map(({ icon: Icon, label, desc }) => (
             <div key={label} style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>

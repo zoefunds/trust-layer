@@ -112,12 +112,12 @@ export default function LoginPage() {
           AI-Powered Web3 Due Diligence
         </h2>
         <p style={{ fontSize: 14, color: "#64748B", lineHeight: 1.75, marginBottom: 36 }}>
-          TrustLayer deploys 13 independent AI validators to analyze every angle of a Web3 protocol — from on-chain activity to team credibility — and returns a consensus-backed trust score.
+          TrustLayer deploys 5 independent AI validators to analyze every angle of a Web3 protocol — from on-chain activity to team credibility — and returns a consensus-backed trust score.
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {[
-            { icon: Shield, label: "13 Independent Validators", desc: "Each analyzing a different signal layer" },
+            { icon: Shield, label: "5 Independent Validators", desc: "Each analyzing a different signal layer" },
             { icon: Activity, label: "Real-time Consensus", desc: "GenLayer reconciles all findings live" },
             { icon: Lock, label: "Encrypted Wallet", desc: "Auto-generated, AES-256-GCM secured" },
           ].map(({ icon: Icon, label, desc }) => (
