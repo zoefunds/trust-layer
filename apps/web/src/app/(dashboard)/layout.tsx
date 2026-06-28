@@ -15,16 +15,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-[#080B14] flex items-center justify-center">
-        <span className="w-6 h-6 border-2 border-[#2563EB]/30 border-t-[#2563EB] rounded-full animate-spin" />
+      <div style={{ minHeight: "100vh", background: "#080B14", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ width: 24, height: 24, border: "2px solid rgba(37,99,235,0.3)", borderTopColor: "#2563EB", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#080B14]">
+    <div style={{ minHeight: "100vh", background: "#080B14", color: "#E2E8F0" }}>
       <DashboardNav />
-      <main className="pt-16">{children}</main>
+      <main style={{ paddingTop: 64 }}>{children}</main>
     </div>
   );
 }

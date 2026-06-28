@@ -1,19 +1,13 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/stores/auth";
 import { truncateAddress, getInitials } from "@/lib/utils";
-import { LayoutDashboard, Search, LogOut, Copy, Wallet } from "lucide-react";
+import { LayoutDashboard, Search, LogOut, Copy, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
 const NAV_LINKS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -23,73 +17,109 @@ const NAV_LINKS = [
 export default function DashboardNav() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const copyWallet = () => {
     if (user?.wallet_address) {
       navigator.clipboard.writeText(user.wallet_address);
       toast.success("Wallet address copied");
     }
+    setOpen(false);
   };
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-[#1C2333] bg-[#080B14]/90 backdrop-blur-xl h-16">
-      <div className="max-w-7xl mx-auto px-6 h-full flex items-center justify-between">
-        <div className="flex items-center gap-8">
-          <Link href="/dashboard" className="flex items-center gap-2.5">
+    <nav style={{
+      position: "fixed", top: 0, left: 0, right: 0, zIndex: 50, height: 64,
+      borderBottom: "1px solid #1C2333",
+      background: "rgba(8,11,20,0.92)",
+      backdropFilter: "blur(20px)",
+    }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px", height: "100%", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+
+        {/* Left: Logo + Nav links */}
+        <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
+          <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
             <Image src="/icon.png" alt="TrustLayer" width={28} height={28} />
-            <span className="font-bold text-sm tracking-tight hidden sm:block">TrustLayer</span>
+            <span style={{ fontWeight: 700, fontSize: 15, color: "#E2E8F0", letterSpacing: "-0.01em" }}>TrustLayer</span>
           </Link>
-          <div className="flex items-center gap-1">
-            {NAV_LINKS.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-                  pathname === href
-                    ? "bg-[#2563EB]/10 text-[#60A5FA]"
-                    : "text-[#64748B] hover:text-white hover:bg-[#1C2333]/50"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className="hidden sm:block">{label}</span>
-              </Link>
-            ))}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {NAV_LINKS.map(({ href, label, icon: Icon }) => {
+              const active = pathname === href;
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 7, padding: "7px 14px",
+                    borderRadius: 9, fontSize: 13, fontWeight: active ? 600 : 500,
+                    textDecoration: "none",
+                    background: active ? "rgba(37,99,235,0.12)" : "transparent",
+                    color: active ? "#60A5FA" : "#64748B",
+                  }}
+                >
+                  <Icon style={{ width: 15, height: 15 }} />
+                  <span>{label}</span>
+                </Link>
+              );
+            })}
           </div>
         </div>
 
+        {/* Right: User menu */}
         {user && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2.5 rounded-xl border border-[#1C2333] bg-[#0D1117] px-3 py-2 hover:border-[#2563EB]/40 transition-colors">
-                <div className="w-7 h-7 rounded-full bg-[#2563EB]/20 border border-[#2563EB]/30 flex items-center justify-center text-xs font-bold text-[#60A5FA]">
-                  {getInitials(user.email)}
-                </div>
-                <div className="hidden sm:block text-left">
-                  <div className="text-xs text-[#E2E8F0] font-medium">{user.email.split("@")[0]}</div>
-                  <div className="text-xs text-[#64748B] font-mono">{truncateAddress(user.wallet_address)}</div>
-                </div>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 bg-[#0D1117] border-[#1C2333] text-[#E2E8F0]">
-              <div className="px-3 py-2">
-                <div className="text-sm font-medium">{user.email}</div>
-                <div className="text-xs text-[#64748B] font-mono mt-0.5">{truncateAddress(user.wallet_address)}</div>
+          <div ref={ref} style={{ position: "relative" }}>
+            <button
+              onClick={() => setOpen(!open)}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                borderRadius: 10, border: "1px solid #1C2333", background: "#0D1117",
+                padding: "7px 12px", cursor: "pointer",
+              }}
+            >
+              <div style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(37,99,235,0.2)", border: "1px solid rgba(37,99,235,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#60A5FA" }}>
+                {getInitials(user.email)}
               </div>
-              <DropdownMenuSeparator className="bg-[#1C2333]" />
-              <DropdownMenuItem onClick={copyWallet} className="gap-2 text-[#94A3B8] hover:text-white cursor-pointer">
-                <Copy className="w-4 h-4" /> Copy wallet address
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild className="gap-2 text-[#94A3B8] hover:text-white cursor-pointer">
-                <Link href="/dashboard?export=wallet">
-                  <Wallet className="w-4 h-4" /> Export private key
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-[#1C2333]" />
-              <DropdownMenuItem onClick={logout} className="gap-2 text-[#EF4444] hover:text-[#EF4444] cursor-pointer">
-                <LogOut className="w-4 h-4" /> Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <div style={{ textAlign: "left" }}>
+                <div style={{ fontSize: 12, color: "#E2E8F0", fontWeight: 600 }}>{user.email.split("@")[0]}</div>
+                <div style={{ fontSize: 10, color: "#64748B", fontFamily: "monospace" }}>{truncateAddress(user.wallet_address)}</div>
+              </div>
+              <ChevronDown style={{ width: 13, height: 13, color: "#64748B", marginLeft: 2 }} />
+            </button>
+
+            {open && (
+              <div style={{
+                position: "absolute", right: 0, top: "calc(100% + 8px)",
+                width: 240, borderRadius: 12, border: "1px solid #1C2333",
+                background: "#0D1117", boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
+                overflow: "hidden", zIndex: 100,
+              }}>
+                <div style={{ padding: "14px 16px", borderBottom: "1px solid #1C2333" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#E2E8F0" }}>{user.email}</div>
+                  <div style={{ fontSize: 11, color: "#64748B", fontFamily: "monospace", marginTop: 3 }}>{truncateAddress(user.wallet_address)}</div>
+                </div>
+                <button onClick={copyWallet} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", background: "none", border: "none", cursor: "pointer", color: "#94A3B8", fontSize: 13 }}>
+                  <Copy style={{ width: 14, height: 14 }} /> Copy wallet address
+                </button>
+                <div style={{ borderTop: "1px solid #1C2333" }} />
+                <button
+                  onClick={() => { logout(); setOpen(false); }}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", background: "none", border: "none", cursor: "pointer", color: "#EF4444", fontSize: 13 }}
+                >
+                  <LogOut style={{ width: 14, height: 14 }} /> Sign out
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </nav>

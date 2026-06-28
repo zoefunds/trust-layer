@@ -1,18 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useAuthStore } from "@/stores/auth";
 import { useInvestigationsStore } from "@/stores/investigations";
-import { formatDate, getTrustColor, getRiskColor, getRiskLabel } from "@/lib/utils";
-import { Search, Zap, Shield, TrendingUp, Clock, ArrowRight, AlertTriangle } from "lucide-react";
-import { useEffect } from "react";
+import { getTrustColor, getRiskColor, getRiskLabel, formatDate } from "@/lib/utils";
+import { Search, Zap, Shield, TrendingUp, Clock, ArrowRight } from "lucide-react";
 
 const EXAMPLE_PROTOCOLS = [
   "Hyperlane", "Meteora", "Initia", "Monad", "Pump.fun",
   "Eigenlayer", "Scroll", "Optimism", "Arbitrum", "Uniswap",
 ];
+
+const STATUS_STYLES: Record<string, { bg: string; color: string; dot: string }> = {
+  completed: { bg: "rgba(16,185,129,0.12)", color: "#10B981", dot: "#10B981" },
+  running:   { bg: "rgba(37,99,235,0.12)",  color: "#2563EB", dot: "#2563EB" },
+  failed:    { bg: "rgba(239,68,68,0.12)",  color: "#EF4444", dot: "#EF4444" },
+  pending:   { bg: "rgba(100,116,139,0.12)", color: "#64748B", dot: "#64748B" },
+};
 
 export default function DashboardPage() {
   const [query, setQuery] = useState("");
@@ -34,54 +40,73 @@ export default function DashboardPage() {
   };
 
   const completedCount = investigations.filter((i) => i.status === "completed").length;
-  const avgScore = investigations
-    .filter((i) => i.report)
-    .reduce((acc, i) => acc + (i.report?.scores.overall || 0), 0) /
-    (investigations.filter((i) => i.report).length || 1);
+  const withReport = investigations.filter((i) => i.report);
+  const avgScore = withReport.length
+    ? withReport.reduce((a, i) => a + (i.report?.scores.overall ?? 0), 0) / withReport.length
+    : 0;
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-10">
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px" }}>
+
       {/* Greeting */}
-      <div className="mb-10">
-        <h1 className="text-2xl font-bold mb-1">
-          Good {new Date().getHours() < 12 ? "morning" : "afternoon"},{" "}
-          <span className="text-[#2563EB]">{user?.email.split("@")[0]}</span>
+      <div style={{ marginBottom: 36 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, color: "#E2E8F0", letterSpacing: "-0.02em", marginBottom: 6 }}>
+          {greeting},{" "}
+          <span style={{ color: "#2563EB" }}>{user?.email.split("@")[0]}</span>
         </h1>
-        <p className="text-[#64748B] text-sm">Investigate any Web3 protocol using consensus-backed AI validation.</p>
+        <p style={{ fontSize: 14, color: "#64748B" }}>
+          Investigate any Web3 protocol using consensus-backed AI validation.
+        </p>
       </div>
 
-      {/* Search / Investigate box */}
-      <div className="rounded-2xl border border-[#1C2333] bg-[#0D1117] p-6 mb-8 glow-pulse">
-        <div className="flex items-center gap-2 mb-3">
-          <Search className="w-4 h-4 text-[#2563EB]" />
-          <span className="text-sm font-semibold text-[#E2E8F0]">New Investigation</span>
+      {/* New Investigation box */}
+      <div style={{ borderRadius: 16, border: "1px solid #1C2333", background: "#0D1117", padding: "24px", marginBottom: 28, boxShadow: "0 0 32px rgba(37,99,235,0.08)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <Search style={{ width: 16, height: 16, color: "#2563EB" }} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#E2E8F0" }}>New Investigation</span>
         </div>
-        <div className="flex gap-3">
+        <div style={{ display: "flex", gap: 12 }}>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleInvestigate()}
             placeholder="Enter protocol name (e.g. Hyperlane, Meteora, Initia...)"
-            className="flex-1 bg-[#080B14] border border-[#1C2333] rounded-xl px-4 py-3 text-sm text-[#E2E8F0] placeholder-[#64748B] focus:outline-none focus:border-[#2563EB]/50 focus:ring-1 focus:ring-[#2563EB]/20 transition-all"
+            style={{
+              flex: 1, background: "#080B14", border: "1px solid #1C2333",
+              borderRadius: 12, padding: "12px 16px", fontSize: 14,
+              color: "#E2E8F0", outline: "none",
+            }}
           />
           <button
             onClick={() => handleInvestigate()}
             disabled={isCreating}
-            className="flex items-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white px-6 py-3 rounded-xl font-semibold text-sm transition-all whitespace-nowrap"
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: isCreating ? "#1D4ED8" : "#2563EB",
+              color: "#fff", padding: "12px 24px", borderRadius: 12,
+              fontWeight: 700, fontSize: 14, border: "none", cursor: isCreating ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap", opacity: isCreating ? 0.7 : 1,
+            }}
           >
-            {isCreating ? (
-              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <><Zap className="w-4 h-4" /> Investigate</>
-            )}
+            {isCreating
+              ? <span style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+              : <><Zap style={{ width: 15, height: 15 }} /> Investigate</>
+            }
           </button>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8 }}>
           {EXAMPLE_PROTOCOLS.map((p) => (
             <button
               key={p}
               onClick={() => handleInvestigate(p)}
-              className="text-xs px-3 py-1.5 rounded-lg border border-[#1C2333] bg-[#080B14] text-[#64748B] hover:text-white hover:border-[#2563EB]/40 transition-all"
+              style={{
+                fontSize: 12, padding: "6px 12px", borderRadius: 8,
+                border: "1px solid #1C2333", background: "#080B14",
+                color: "#64748B", cursor: "pointer",
+              }}
             >
               {p}
             </button>
@@ -89,90 +114,97 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      {/* Stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 28 }}>
         {[
           { label: "Total Investigations", value: investigations.length, icon: Search, color: "#2563EB" },
           { label: "Completed", value: completedCount, icon: Shield, color: "#10B981" },
           { label: "Avg Trust Score", value: avgScore > 0 ? avgScore.toFixed(1) : "—", icon: TrendingUp, color: "#F59E0B" },
-        ].map((stat) => (
-          <div key={stat.label} className="rounded-xl border border-[#1C2333] bg-[#0D1117] p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs text-[#64748B]">{stat.label}</span>
-              <stat.icon className="w-4 h-4" style={{ color: stat.color }} />
+        ].map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <div key={stat.label} style={{ borderRadius: 14, border: "1px solid #1C2333", background: "#0D1117", padding: "20px 22px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: 12, color: "#64748B" }}>{stat.label}</span>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: `${stat.color}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Icon style={{ width: 14, height: 14, color: stat.color }} />
+                </div>
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#fff", letterSpacing: "-0.02em" }}>{stat.value}</div>
             </div>
-            <div className="text-2xl font-bold text-white">{stat.value}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Recent investigations */}
       <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-[#94A3B8]">Recent Investigations</h2>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 13, fontWeight: 600, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Recent Investigations</h2>
           <button
             onClick={() => router.push("/investigations")}
-            className="text-xs text-[#2563EB] hover:text-[#60A5FA] flex items-center gap-1 transition-colors"
+            style={{ fontSize: 12, color: "#2563EB", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
           >
-            View all <ArrowRight className="w-3 h-3" />
+            View all <ArrowRight style={{ width: 12, height: 12 }} />
           </button>
         </div>
 
         {investigations.length === 0 ? (
-          <div className="rounded-xl border border-[#1C2333] bg-[#0D1117] p-10 text-center">
-            <Shield className="w-10 h-10 text-[#1C2333] mx-auto mb-3" />
-            <div className="text-sm text-[#64748B]">No investigations yet.</div>
-            <div className="text-xs text-[#1C2333] mt-1">Enter a protocol name above to get started.</div>
+          <div style={{ borderRadius: 16, border: "1px solid #1C2333", background: "#0D1117", padding: "60px 24px", textAlign: "center" }}>
+            <Shield style={{ width: 36, height: 36, color: "#1C2333", margin: "0 auto 12px" }} />
+            <div style={{ fontSize: 14, color: "#64748B" }}>No investigations yet.</div>
+            <div style={{ fontSize: 12, color: "#334155", marginTop: 4 }}>Enter a protocol name above to get started.</div>
           </div>
         ) : (
-          <div className="space-y-3">
-            {investigations.slice(0, 5).map((inv) => (
-              <button
-                key={inv.id}
-                onClick={() => router.push(`/investigations/${inv.id}`)}
-                className="w-full text-left rounded-xl border border-[#1C2333] bg-[#0D1117] px-5 py-4 hover:border-[#2563EB]/30 transition-all group"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${
-                      inv.status === "completed" ? "bg-[#10B981]" :
-                      inv.status === "running" ? "bg-[#2563EB] pulse-dot" :
-                      inv.status === "failed" ? "bg-[#EF4444]" :
-                      "bg-[#64748B]"
-                    }`} />
-                    <span className="font-semibold text-sm text-white">{inv.protocol_name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-mono ${
-                      inv.status === "completed" ? "badge-verified" :
-                      inv.status === "running" ? "border-[#2563EB]/30 text-[#2563EB] bg-[#2563EB]/10" :
-                      inv.status === "failed" ? "badge-disputed" :
-                      "border-[#64748B]/30 text-[#64748B] bg-[#64748B]/10"
-                    }`}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {investigations.slice(0, 8).map((inv) => {
+              const s = STATUS_STYLES[inv.status] || STATUS_STYLES.pending;
+              return (
+                <button
+                  key={inv.id}
+                  onClick={() => router.push(`/investigations/${inv.id}`)}
+                  style={{
+                    width: "100%", textAlign: "left", borderRadius: 14,
+                    border: "1px solid #1C2333", background: "#0D1117",
+                    padding: "16px 20px", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.dot, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: 14, color: "#E2E8F0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {inv.protocol_name}
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: s.bg, color: s.color, fontFamily: "monospace", flexShrink: 0 }}>
                       {inv.status}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div style={{ display: "flex", alignItems: "center", gap: 20, flexShrink: 0 }}>
                     {inv.report && (
-                      <div className="text-right">
-                        <div className="text-sm font-bold" style={{ color: getTrustColor(inv.report.scores.overall) }}>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: getTrustColor(inv.report.scores.overall) }}>
                           {inv.report.scores.overall.toFixed(1)}
                         </div>
-                        <div className="text-xs" style={{ color: getRiskColor(inv.report.risk_level) }}>
+                        <div style={{ fontSize: 10, color: getRiskColor(inv.report.risk_level) }}>
                           {getRiskLabel(inv.report.risk_level)}
                         </div>
                       </div>
                     )}
-                    <div className="flex items-center gap-1 text-xs text-[#64748B]">
-                      <Clock className="w-3 h-3" />
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#475569" }}>
+                      <Clock style={{ width: 12, height: 12 }} />
                       {formatDate(inv.created_at)}
                     </div>
-                    <ArrowRight className="w-4 h-4 text-[#64748B] group-hover:text-white transition-colors" />
+                    <ArrowRight style={{ width: 14, height: 14, color: "#334155" }} />
                   </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
