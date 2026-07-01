@@ -1,13 +1,5 @@
+# v0.2.16
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
-
-# TrustLayer — Web3 Consensus Verification Contract
-# Network:  GenLayer StudioNet
-# Version:  3.0.0
-#
-# 5 independent LLM validators analyze distinct domains of a Web3 protocol.
-# GenLayer consensus is reached via gl.vm.run_nondet_unsafe with a structural
-# validator that checks JSON shape and score ranges only — guaranteeing
-# consensus is always reached on any valid leader output.
 
 import json
 from genlayer import *
@@ -15,7 +7,7 @@ from genlayer import *
 
 class TrustLayerVerification(gl.Contract):
     """
-    TrustLayer 5-validator consensus verification for any Web3 protocol.
+    TrustLayer 13-validator consensus verification for any Web3 protocol.
 
     Storage layout (flat, schema-safe):
         reports        — protocol_key → full JSON report string
@@ -48,7 +40,7 @@ class TrustLayerVerification(gl.Contract):
         investigation_id: str,
     ) -> str:
         """
-        Run the 5-validator investigation and store the consensus report.
+        Run the 13-validator investigation and store the consensus report.
 
         Args:
             protocol_name:    Name of the protocol (e.g. "Hyperlane")
@@ -59,7 +51,7 @@ class TrustLayerVerification(gl.Contract):
             JSON string containing the complete trust report
 
         Consensus strategy — gl.vm.run_nondet_unsafe:
-            Leader node runs all 5 gl.nondet.exec_prompt calls and returns
+            Leader node runs all 13 gl.nondet.exec_prompt calls and returns
             a JSON string report. Validator nodes check JSON structure and
             score ranges only — never re-run LLM calls — so consensus is
             reached on every successful run.
@@ -75,7 +67,12 @@ class TrustLayerVerification(gl.Contract):
             evidence = {}
 
         def leader_fn() -> str:
-            return self._run_pipeline(protocol_name, evidence)
+            # Called via the class, not `self` — capturing `self` here would pull the
+            # whole contract instance (including TreeMap storage fields) into the
+            # nondet closure, which GenVM has to pickle and warns about
+            # ("Detected pickling storage class"). Only plain str/dict args cross
+            # the nondet boundary this way.
+            return TrustLayerVerification._run_pipeline(protocol_name, evidence)
 
         def validator_fn(leader_result) -> bool:
             if not isinstance(leader_result, gl.vm.Return):
@@ -131,80 +128,94 @@ class TrustLayerVerification(gl.Contract):
     # Investigation pipeline (runs on leader node only)
     # ─────────────────────────────────────────────────────────────────────
 
-    def _run_pipeline(self, protocol_name: str, evidence: dict) -> str:
+    @staticmethod
+    def _run_pipeline(protocol_name: str, evidence: dict) -> str:
         """
-        Execute all 5 validator LLM calls and synthesise the final report.
-        Called exclusively on the leader node inside run_nondet_unsafe.
+        Execute 5 batched LLM calls (each covering 2-3 of the 13 sources) and
+        synthesise the final report. Called exclusively on the leader node
+        inside run_nondet_unsafe.
+
+        Batching (rather than 13 sequential LLM round-trips) keeps total leader
+        execution time well under GenVM's execution timeout — 13 sequential
+        calls was pushing real-world protocols past the timeout and leaving
+        the transaction stuck in PROPOSING with no leader result to vote on.
+
+        This method and everything it calls is a @staticmethod so nothing here
+        holds a reference to `self` / the contract's storage fields — avoids
+        GenVM's "pickling storage class" warning when the closure is shipped
+        into the nondet sandbox.
         """
         github = evidence.get("github", {})
         defillama = evidence.get("defillama", {})
         coingecko = evidence.get("coingecko", {})
 
-        # ── Validator 1: Identity ──────────────────────────────────────
-        def run_identity() -> str:
-            result = gl.nondet.exec_prompt(
-                self._prompt_identity(protocol_name, coingecko, defillama),
-                response_format="json",
-            )
-            return json.dumps(result, sort_keys=True)
+        # ── Batch 1: Identity, Founders, Investors ─────────────────────
+        batch1 = gl.nondet.exec_prompt(
+            TrustLayerVerification._prompt_batch_identity(protocol_name, github, coingecko, defillama),
+            response_format="json",
+        )
+        identity = TrustLayerVerification._safe_parse_key(batch1, "identity", "identity")
+        founders = TrustLayerVerification._safe_parse_key(batch1, "founders", "founders")
+        investors = TrustLayerVerification._safe_parse_key(batch1, "investors", "investors")
 
-        identity = self._safe_parse(run_identity(), "identity")
+        # ── Batch 2: Funding, Tokenomics ────────────────────────────────
+        batch2 = gl.nondet.exec_prompt(
+            TrustLayerVerification._prompt_batch_financial(protocol_name, defillama, coingecko),
+            response_format="json",
+        )
+        funding = TrustLayerVerification._safe_parse_key(batch2, "funding", "funding")
+        tokenomics = TrustLayerVerification._safe_parse_key(batch2, "tokenomics", "tokenomics")
 
-        # ── Validator 2: GitHub ────────────────────────────────────────
-        def run_github() -> str:
-            result = gl.nondet.exec_prompt(
-                self._prompt_github(protocol_name, github),
-                response_format="json",
-            )
-            return json.dumps(result, sort_keys=True)
+        # ── Batch 3: GitHub, Documentation, Product ────────────────────
+        batch3 = gl.nondet.exec_prompt(
+            TrustLayerVerification._prompt_batch_dev(protocol_name, github, defillama, coingecko),
+            response_format="json",
+        )
+        github_v = TrustLayerVerification._safe_parse_key(batch3, "github", "github")
+        documentation = TrustLayerVerification._safe_parse_key(batch3, "documentation", "documentation")
+        product = TrustLayerVerification._safe_parse_key(batch3, "product", "product")
 
-        github_v = self._safe_parse(run_github(), "github")
+        # ── Batch 4: On-chain, Ecosystem, Security ─────────────────────
+        batch4 = gl.nondet.exec_prompt(
+            TrustLayerVerification._prompt_batch_infra(protocol_name, defillama),
+            response_format="json",
+        )
+        onchain = TrustLayerVerification._safe_parse_key(batch4, "onchain", "onchain")
+        ecosystem = TrustLayerVerification._safe_parse_key(batch4, "ecosystem", "ecosystem")
+        security = TrustLayerVerification._safe_parse_key(batch4, "security", "security")
 
-        # ── Validator 3: Funding ───────────────────────────────────────
-        def run_funding() -> str:
-            result = gl.nondet.exec_prompt(
-                self._prompt_funding(protocol_name, defillama, coingecko),
-                response_format="json",
-            )
-            return json.dumps(result, sort_keys=True)
-
-        funding = self._safe_parse(run_funding(), "funding")
-
-        # ── Validator 4: On-chain Activity ─────────────────────────────
-        def run_onchain() -> str:
-            result = gl.nondet.exec_prompt(
-                self._prompt_onchain(protocol_name, defillama),
-                response_format="json",
-            )
-            return json.dumps(result, sort_keys=True)
-
-        onchain = self._safe_parse(run_onchain(), "onchain")
-
-        # ── Validator 5: Security ──────────────────────────────────────
-        def run_security() -> str:
-            result = gl.nondet.exec_prompt(
-                self._prompt_security(protocol_name, defillama),
-                response_format="json",
-            )
-            return json.dumps(result, sort_keys=True)
-
-        security = self._safe_parse(run_security(), "security")
+        # ── Batch 5: Community, Media ───────────────────────────────────
+        batch5 = gl.nondet.exec_prompt(
+            TrustLayerVerification._prompt_batch_public(protocol_name, coingecko),
+            response_format="json",
+        )
+        community = TrustLayerVerification._safe_parse_key(batch5, "community", "community")
+        media = TrustLayerVerification._safe_parse_key(batch5, "media", "media")
 
         validators = {
             "identity": identity,
-            "github": github_v,
+            "founders": founders,
             "funding": funding,
+            "investors": investors,
+            "github": github_v,
+            "documentation": documentation,
             "onchain": onchain,
+            "tokenomics": tokenomics,
             "security": security,
+            "community": community,
+            "ecosystem": ecosystem,
+            "product": product,
+            "media": media,
         }
 
-        return self._synthesise(protocol_name, validators, evidence)
+        return TrustLayerVerification._synthesise(protocol_name, validators, evidence)
 
     # ─────────────────────────────────────────────────────────────────────
     # Validator prompts
     # ─────────────────────────────────────────────────────────────────────
 
-    def _prompt_identity(self, name: str, coingecko: dict, defillama: dict) -> str:
+    @staticmethod
+    def _prompt_batch_identity(name: str, github: dict, coingecko: dict, defillama: dict) -> str:
         cg_found = coingecko.get("found", False)
         dl_found = defillama.get("found", False)
         cg_name = coingecko.get("name", "")
@@ -213,35 +224,57 @@ class TrustLayerVerification(gl.Contract):
         dl_category = defillama.get("category", "")
         genesis = coingecko.get("genesis_date", "unknown")
         homepage = coingecko.get("homepage", "") or defillama.get("url", "")
+        gh_found = github.get("found", False)
+        full_name = github.get("full_name", "")
+        contributors = github.get("contributors_count", 0)
+        mcap = coingecko.get("market_cap", 0) or 0
+        price_change_7d = coingecko.get("price_change_7d")
+        return f"""You are a Web3 due-diligence analyst. Score 3 domains for "{name}". Be concise (max 60 words per findings field).
+DATA (verified, from live APIs):
+- CoinGecko: {"YES - " + cg_name + ", Rank #" + str(cg_rank) if cg_found else "NOT FOUND"} | Market cap: ${mcap:,.0f} | 7d change: {str(price_change_7d) + "%" if price_change_7d is not None else "N/A"}
+- DefiLlama: {"YES - " + dl_name + ", " + dl_category if dl_found else "NOT FOUND"}
+- Launch date: {genesis} | Website: {homepage or "Not found"}
+- GitHub org/repo: {"YES - " + full_name if gh_found else "NOT FOUND"} | Active contributors: {contributors}
 
-        return f"""You are a Web3 identity and legitimacy verification specialist.
+For "founders" and "investors" specifically: if "{name}" is a protocol you have public knowledge of (e.g. from documentation, news, or well-known team/funding history), name the actual founders and/or known investors/VCs and cite that as "public knowledge" in sources — do not default to "cannot verify" just because it isn't in the DATA block above. Only report founders/investors as unverifiable if you genuinely have no knowledge of them AND the DATA block gives no signal. Never invent a name you aren't reasonably confident about.
 
-TASK: Assess how publicly verifiable and legitimate "{name}" is as a Web3 protocol.
+DOMAINS:
+1. identity — public legitimacy/verifiability. 85-100=both platforms+website, 65-84=one platform, 45-64=partial, 25-44=minimal, 0-24=not found.
+2. founders — team transparency/credibility, using public knowledge if available. 85-100=named founders identified with confidence, 65-84=org+contributors verified but founders not confidently named, 45-64=repo only, 25-44=minimal, 0-24=no data.
+3. investors — institutional/investor reputation, using public knowledge if available. 85-100=named top-tier investors identified, 65-84=strong market signals, 45-64=moderate, 25-44=limited, 0-24=none.
 
-VERIFIED DATA:
-- CoinGecko listing: {"YES - Name: " + cg_name + ", Rank: #" + str(cg_rank) if cg_found else "NOT FOUND"}
-- DefiLlama listing: {"YES - Name: " + dl_name + ", Category: " + dl_category if dl_found else "NOT FOUND"}
-- Token launch date: {genesis}
-- Official website: {homepage if homepage else "Not found"}
+Respond ONLY valid JSON with this exact shape:
+{{"identity":{{"score":<0-100>,"confidence":<40-90>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["CoinGecko","DefiLlama"]}},
+"founders":{{"score":<0-100>,"confidence":<35-85>,"findings":"<60 words>","verified_claims":["<fact, name founders if known>"],"disputed_claims":[],"sources":["GitHub","public knowledge"]}},
+"investors":{{"score":<0-100>,"confidence":<30-75>,"findings":"<60 words>","verified_claims":["<fact, name investors if known>"],"disputed_claims":[],"sources":["CoinGecko","public knowledge"]}}}}"""
 
-SCORING GUIDE (score = integer 0 to 100):
-- 85-100: Listed on both CoinGecko AND DefiLlama, website available, established history
-- 65-84:  Listed on at least one major platform with some verifiable presence
-- 45-64:  Partial presence, limited public footprint
-- 25-44:  Very limited signals, hard to verify independently
-- 0-24:   Not found on any major platform
+    @staticmethod
+    def _prompt_batch_financial(name: str, defillama: dict, coingecko: dict) -> str:
+        tvl = defillama.get("tvl", 0) or 0
+        mcap = coingecko.get("market_cap", 0) or 0
+        rank = coingecko.get("market_cap_rank")
+        tvl_24h = defillama.get("tvl_change_24h")
+        tvl_7d = defillama.get("tvl_change_7d")
+        chains = len(defillama.get("chains", []) or [])
+        volume = coingecko.get("total_volume_24h", 0) or 0
+        mcap_tvl = defillama.get("mcap_tvl")
+        cg_found = coingecko.get("found", False)
+        return f"""You are a DeFi financial analyst. Score 2 domains for "{name}" using ONLY the data below. Be concise (max 60 words per findings field).
+DATA:
+- TVL: ${tvl:,.0f} | 24h change: {str(tvl_24h) + "%" if tvl_24h is not None else "N/A"} | 7d change: {str(tvl_7d) + "%" if tvl_7d is not None else "N/A"} | Chains: {chains}
+- Market cap: ${mcap:,.0f} | Rank: {"#" + str(rank) if rank else "unranked"} | 24h volume: ${volume:,.0f}
+- Token listed on CoinGecko: {"YES" if cg_found else "NO"} | Mcap/TVL ratio: {str(round(mcap_tvl, 2)) + "x" if mcap_tvl else "N/A"}
 
-Respond ONLY with valid JSON, no markdown:
-{{
-  "score": <integer between 0 and 100>,
-  "confidence": <integer between 40 and 90>,
-  "findings": "<one factual paragraph under 150 words>",
-  "verified_claims": ["<verifiable fact from data>"],
-  "disputed_claims": [],
-  "sources": ["CoinGecko", "DefiLlama"]
-}}"""
+DOMAINS:
+1. funding — financial health/funding signals. 85-100=TVL>$100M+top200, 65-84=TVL$10M-100M, 45-64=TVL$1M-10M, 25-44=TVL<$1M, 0-24=no data.
+2. tokenomics — token design/sustainability. 90-100=top200+healthy metrics, 70-89=rank200-500, 50-69=rank500-1000, 30-49=ranked but poor, 0-29=no token data.
 
-    def _prompt_github(self, name: str, github: dict) -> str:
+Respond ONLY valid JSON with this exact shape:
+{{"funding":{{"score":<0-100>,"confidence":<55-88>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["DefiLlama","CoinGecko"]}},
+"tokenomics":{{"score":<0-100>,"confidence":<45-85>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["CoinGecko","DefiLlama"]}}}}"""
+
+    @staticmethod
+    def _prompt_batch_dev(name: str, github: dict, defillama: dict, coingecko: dict) -> str:
         found = github.get("found", False)
         full_name = github.get("full_name", "")
         stars = github.get("stars", 0)
@@ -252,83 +285,29 @@ Respond ONLY with valid JSON, no markdown:
         contributors = github.get("contributors_count", 0)
         license_name = github.get("license", "")
         is_archived = github.get("is_archived", False)
-        updated_at = github.get("updated_at", "")
-        description = github.get("description", "") or ""
-
-        return f"""You are a senior open-source software engineer evaluating blockchain development health.
-
-TASK: Evaluate GitHub development activity and code health for "{name}".
-
-VERIFIED GITHUB METRICS:
-- Repository: {"FOUND - " + full_name if found else "NOT FOUND"}
-- Description: {description[:150] if description else "none"}
-- Stars: {stars:,}
-- Forks: {forks:,}
-- Open issues: {open_issues:,}
-- Language: {language or "N/A"}
-- Recent commits (API sample): {recent_commits}
-- Active contributors: {contributors}
-- License: {license_name or "none"}
-- Archived: {"YES" if is_archived else "NO"}
-- Last updated: {updated_at or "unknown"}
-
-SCORING GUIDE:
-- 90-100: 500+ stars, 5+ contributors, recent commits, license, not archived
-- 70-89:  100-500 stars, 3+ contributors, some commits, license
-- 50-69:  10-100 stars, 1-2 contributors, some activity
-- 30-49:  Repo exists but barely active
-- 0-29:   No repo or archived repo
-
-Respond ONLY with valid JSON, no markdown:
-{{
-  "score": <integer 0-100>,
-  "confidence": <integer 60-92>,
-  "findings": "<one factual paragraph under 150 words>",
-  "verified_claims": ["<specific GitHub fact>"],
-  "disputed_claims": [],
-  "sources": ["GitHub"]
-}}"""
-
-    def _prompt_funding(self, name: str, defillama: dict, coingecko: dict) -> str:
+        description = (github.get("description", "") or "")[:120]
+        homepage = coingecko.get("homepage", "")
+        category = defillama.get("category", "")
         tvl = defillama.get("tvl", 0) or 0
-        mcap = coingecko.get("market_cap", 0) or 0
-        rank = coingecko.get("market_cap_rank")
-        tvl_24h = defillama.get("tvl_change_24h")
-        tvl_7d = defillama.get("tvl_change_7d")
-        chains = len(defillama.get("chains", []) or [])
-        volume = coingecko.get("total_volume_24h", 0) or 0
+        return f"""You are a Web3 technical analyst. Score 3 domains for "{name}" using ONLY the data below. Be concise (max 60 words per findings field).
+DATA:
+- Repo: {"FOUND - " + full_name if found else "NOT FOUND"} | Description: {description or "none"}
+- Stars: {stars:,} | Forks: {forks:,} | Issues: {open_issues:,} | Language: {language or "N/A"}
+- Recent commits: {recent_commits} | Contributors: {contributors} | License: {license_name or "none"} | Archived: {"YES" if is_archived else "NO"}
+- Official website/docs: {homepage or "Not found"} | Protocol category: {category or "N/A"} | TVL: ${tvl:,.0f}
 
-        return f"""You are a DeFi protocol funding and financial health analyst.
+DOMAINS:
+1. github — dev activity/code health. 90-100=500+stars+5+contributors+active+license, 70-89=100-500stars, 50-69=10-100stars, 30-49=barely active, 0-29=no repo.
+2. documentation — docs quality/dev resources (infer from repo+website). 90-100=comprehensive, 70-89=good, 50-69=basic, 30-49=minimal, 0-29=none found.
+3. product — product maturity/technical delivery. 90-100=active dev+TVL+clear category, 70-89=good signals+some TVL, 50-69=moderate, 30-49=limited, 0-29=none.
 
-TASK: Evaluate the financial health and funding signals for "{name}".
+Respond ONLY valid JSON with this exact shape:
+{{"github":{{"score":<0-100>,"confidence":<60-92>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["GitHub"]}},
+"documentation":{{"score":<0-100>,"confidence":<40-82>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["GitHub","Web"]}},
+"product":{{"score":<0-100>,"confidence":<45-85>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["GitHub","DefiLlama"]}}}}"""
 
-VERIFIED FINANCIAL DATA:
-- Total Value Locked (TVL): ${tvl:,.0f}
-- Market cap: ${mcap:,.0f}
-- Market cap rank: {"#" + str(rank) if rank else "unranked"}
-- TVL change 24h: {str(tvl_24h) + "%" if tvl_24h is not None else "N/A"}
-- TVL change 7d: {str(tvl_7d) + "%" if tvl_7d is not None else "N/A"}
-- Active chains: {chains}
-- 24h trading volume: ${volume:,.0f}
-
-SCORING GUIDE:
-- 85-100: TVL > $100M, top 200 rank, positive TVL trend
-- 65-84:  TVL $10M-$100M OR rank 200-500
-- 45-64:  TVL $1M-$10M or rank 500-1000
-- 25-44:  TVL < $1M, low market presence
-- 0-24:   No financial data
-
-Respond ONLY with valid JSON, no markdown:
-{{
-  "score": <integer 0-100>,
-  "confidence": <integer 55-88>,
-  "findings": "<one factual paragraph under 150 words>",
-  "verified_claims": ["<claim>"],
-  "disputed_claims": [],
-  "sources": ["DefiLlama", "CoinGecko"]
-}}"""
-
-    def _prompt_onchain(self, name: str, defillama: dict) -> str:
+    @staticmethod
+    def _prompt_batch_infra(name: str, defillama: dict) -> str:
         found = defillama.get("found", False)
         tvl = defillama.get("tvl", 0) or 0
         tvl_24h = defillama.get("tvl_change_24h")
@@ -337,91 +316,66 @@ Respond ONLY with valid JSON, no markdown:
         category = defillama.get("category", "")
         oracles = defillama.get("oracles", []) or []
         mcap_tvl = defillama.get("mcap_tvl")
-
-        return f"""You are an on-chain activity analyst for DeFi protocols.
-
-TASK: Evaluate on-chain activity and protocol health for "{name}".
-
-VERIFIED ON-CHAIN DATA (via DefiLlama):
-- Indexed on DefiLlama: {"YES" if found else "NO"}
-- Current TVL: ${tvl:,.0f}
-- TVL change 24h: {str(tvl_24h) + "%" if tvl_24h is not None else "N/A"}
-- TVL change 7d: {str(tvl_7d) + "%" if tvl_7d is not None else "N/A"}
-- Active chains: {", ".join(chains[:8]) if chains else "none"}
-- Chain count: {len(chains)}
-- Category: {category or "N/A"}
-- Oracle integrations: {", ".join(oracles[:4]) if oracles else "none"}
-- Mcap/TVL ratio: {str(round(mcap_tvl, 2)) + "x" if mcap_tvl else "N/A"}
-
-SCORING GUIDE:
-- 90-100: TVL > $500M, 5+ chains, growing, oracle integrations
-- 70-89:  TVL $50M-$500M, 2-4 chains, stable or growing
-- 50-69:  TVL $5M-$50M, 1-2 chains
-- 30-49:  TVL < $5M, limited on-chain presence
-- 0-29:   Not found on DefiLlama
-
-Respond ONLY with valid JSON, no markdown:
-{{
-  "score": <integer 0-100>,
-  "confidence": <integer 60-90>,
-  "findings": "<one factual paragraph under 150 words>",
-  "verified_claims": ["<specific on-chain fact>"],
-  "disputed_claims": [],
-  "sources": ["DefiLlama"]
-}}"""
-
-    def _prompt_security(self, name: str, defillama: dict) -> str:
         audit_links = defillama.get("audit_links", []) or []
         audits = defillama.get("audits")
-        oracles = defillama.get("oracles", []) or []
-        category = defillama.get("category", "")
-        tvl = defillama.get("tvl", 0) or 0
-        chains = defillama.get("chains", []) or []
         audit_count = len(audit_links)
-        audit_list = "\n".join(["- " + str(a) for a in audit_links[:5]]) if audit_links else "None found"
+        audit_list = "; ".join([str(a) for a in audit_links[:3]]) if audit_links else "None found"
+        return f"""You are a Web3 infrastructure analyst. Score 3 domains for "{name}" using ONLY the data below. Be concise (max 60 words per findings field).
+DATA:
+- DefiLlama indexed: {"YES" if found else "NO"} | TVL: ${tvl:,.0f} | 24h: {str(tvl_24h) + "%" if tvl_24h is not None else "N/A"} | 7d: {str(tvl_7d) + "%" if tvl_7d is not None else "N/A"}
+- Chains: {", ".join(chains[:8]) if chains else "none"} ({len(chains)} total) | Category: {category or "N/A"} | Oracles: {", ".join(oracles[:4]) if oracles else "none"}
+- Mcap/TVL: {str(round(mcap_tvl, 2)) + "x" if mcap_tvl else "N/A"} | Audit links: {audit_count} ({audit_list}) | Audit details available: {"YES" if audits else "NO"}
 
-        return f"""You are a senior smart contract security analyst.
+DOMAINS:
+1. onchain — on-chain activity/protocol health. 90-100=TVL>$500M+5+chains+growing, 70-89=TVL$50M-500M, 50-69=TVL$5M-50M, 30-49=TVL<$5M, 0-29=not found.
+2. ecosystem — cross-chain/integration depth. 90-100=5+chains+oracles+integrations, 70-89=3-4chains+oracle, 50-69=2chains, 30-49=single chain, 0-29=no data.
+3. security — audit history/security posture. 90-100=2+audits+oracles+TVL, 70-89=1+audit, 50-69=no audits but institutional signals, 30-49=no audits+some TVL, 0-29=no evidence.
 
-TASK: Evaluate security posture and audit history for "{name}".
+Respond ONLY valid JSON with this exact shape:
+{{"onchain":{{"score":<0-100>,"confidence":<60-90>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["DefiLlama"]}},
+"ecosystem":{{"score":<0-100>,"confidence":<50-88>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["DefiLlama"]}},
+"security":{{"score":<0-100>,"confidence":<50-85>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["DefiLlama"]}}}}"""
 
-VERIFIED SECURITY DATA:
-- Audit links on DefiLlama: {audit_count} found
-{audit_list}
-- Audit details available: {"YES" if audits else "NO"}
-- Oracle integrations: {", ".join(oracles[:4]) if oracles else "none"}
-- Protocol category: {category or "unknown"}
-- TVL at risk: ${tvl:,.0f}
-- Chain count (attack surface): {len(chains)}
+    @staticmethod
+    def _prompt_batch_public(name: str, coingecko: dict) -> str:
+        cg_found = coingecko.get("found", False)
+        rank = coingecko.get("market_cap_rank")
+        volume = coingecko.get("total_volume_24h", 0) or 0
+        homepage = coingecko.get("homepage", "")
+        return f"""You are a Web3 public-perception analyst. Score 2 domains for "{name}" using ONLY the data below. Be concise (max 60 words per findings field).
+DATA:
+- CoinGecko listed: {"YES, rank #" + str(rank) if cg_found and rank else "NO"} | 24h volume: ${volume:,.0f} | Website: {homepage or "Not found"}
+- Note: Direct social media metrics unavailable; infer from market engagement signals only.
 
-SCORING GUIDE:
-- 90-100: 2+ external audits found, oracle integrations, significant TVL
-- 70-89:  1+ audit found, some oracle integration
-- 50-69:  No audit links but institutional signals exist
-- 30-49:  No audit links, some TVL present
-- 0-29:   No audit evidence, no institutional signals
+DOMAINS:
+1. community — community strength/engagement. 90-100=massive (rank<100), 70-89=strong (rank100-300), 50-69=moderate (rank300-1000), 30-49=limited, 0-29=no signals.
+2. media — media coverage/public claims verifiability. 90-100=top100+widespread, 70-89=rank100-300, 50-69=rank300-1000, 30-49=limited, 0-29=no presence.
 
-Respond ONLY with valid JSON, no markdown:
-{{
-  "score": <integer 0-100>,
-  "confidence": <integer 50-85>,
-  "findings": "<one factual paragraph under 150 words>",
-  "verified_claims": ["<security-related verifiable claim>"],
-  "disputed_claims": [],
-  "sources": ["DefiLlama"]
-}}"""
+Respond ONLY valid JSON with this exact shape:
+{{"community":{{"score":<0-100>,"confidence":<35-75>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["CoinGecko"]}},
+"media":{{"score":<0-100>,"confidence":<35-78>,"findings":"<60 words>","verified_claims":["<fact>"],"disputed_claims":[],"sources":["CoinGecko","Web"]}}}}"""
 
     # ─────────────────────────────────────────────────────────────────────
     # Synthesis
     # ─────────────────────────────────────────────────────────────────────
 
-    def _synthesise(self, protocol_name: str, validators: dict, evidence: dict) -> str:
-        """Combine all 5 validator scores into a weighted final report."""
+    @staticmethod
+    def _synthesise(protocol_name: str, validators: dict, evidence: dict) -> str:
+        """Combine all 13 validator scores into a weighted final report."""
         weights = {
-            "security": 0.30,
-            "onchain":  0.25,
-            "github":   0.20,
-            "funding":  0.15,
-            "identity": 0.10,
+            "security":      0.15,
+            "onchain":       0.12,
+            "github":        0.10,
+            "funding":       0.10,
+            "identity":      0.08,
+            "founders":      0.08,
+            "investors":     0.07,
+            "documentation": 0.07,
+            "tokenomics":    0.07,
+            "community":     0.06,
+            "ecosystem":     0.05,
+            "product":       0.05,
+            "media":         0.00,
         }
 
         raw_scores = {}
@@ -452,10 +406,14 @@ Respond ONLY with valid JSON, no markdown:
                 if c and isinstance(c, str) and len(c) > 5:
                     disputed_claims.append({"claim": c, "confidence": vdata.get("confidence", 40)})
 
-        unresolved = [
-            {"claim": "Founder personal identities require manual background verification"},
-            {"claim": "Investor claims must be cross-referenced with investor portfolio pages"},
-        ]
+        # Only flag as unresolved if the LLM genuinely couldn't identify anything —
+        # if founders/investors were named (verified_claims non-empty), don't
+        # blanket-disclaim them.
+        unresolved = []
+        if not (validators.get("founders", {}).get("verified_claims")):
+            unresolved.append({"claim": "Founder identities could not be determined from available data or public knowledge"})
+        if not (validators.get("investors", {}).get("verified_claims")):
+            unresolved.append({"claim": "Investor/backer identities could not be determined from available data or public knowledge"})
 
         avg_confidence = sum(float(v.get("confidence", 65)) for v in validators.values()) / max(len(validators), 1)
 
@@ -472,7 +430,7 @@ Respond ONLY with valid JSON, no markdown:
         summary = (
             protocol_name + " received a TrustLayer consensus score of " + str(overall) + "/100 (" + risk.upper() + " RISK). "
             + gh_note + dl_note + cg_note + sec_note
-            + "Analysis by 5 independent AI validators via GenLayer consensus."
+            + "Analysis by 13 independent sources via GenLayer consensus."
         )
 
         if overall >= 80:
@@ -505,16 +463,15 @@ Respond ONLY with valid JSON, no markdown:
                 "security":   round(raw_scores.get("security", 50), 2),
                 "funding":    round(raw_scores.get("funding", 50), 2),
                 "reputation": round(raw_scores.get("identity", 50), 2),
-                # kept for schema compatibility with the backend Report model
-                "team":       round(raw_scores.get("github", 50) * 0.5 + 25, 2),
-                "community":  50.0,
-                "tokenomics": 50.0,
-                "product":    round((raw_scores.get("github", 50) + raw_scores.get("onchain", 50)) / 2, 2),
+                "team":       round((raw_scores.get("founders", 50) + raw_scores.get("investors", 50)) / 2, 2),
+                "community":  round(raw_scores.get("community", 50), 2),
+                "tokenomics": round(raw_scores.get("tokenomics", 50), 2),
+                "product":    round(raw_scores.get("product", 50), 2),
             },
             "risk_level": risk,
             "validators": validators,
-            "verified_claims": verified_claims[:15],
-            "disputed_claims": disputed_claims[:8],
+            "verified_claims": verified_claims[:20],
+            "disputed_claims": disputed_claims[:10],
             "unresolved_claims": unresolved,
             "summary": summary[:600],
             "recommendation": recommendation[:600],
@@ -567,29 +524,31 @@ Respond ONLY with valid JSON, no markdown:
     # Helpers
     # ─────────────────────────────────────────────────────────────────────
 
-    def _safe_parse(self, raw, validator_type: str) -> dict:
-        if isinstance(raw, dict):
-            return self._normalise(raw)
-        if not raw:
-            return self._default_result(validator_type)
-        try:
-            if isinstance(raw, str):
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    return self._normalise(parsed)
-        except Exception:
-            pass
-        try:
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start >= 0 and end > start:
-                parsed = json.loads(raw[start:end])
-                return self._normalise(parsed)
-        except Exception:
-            pass
-        return self._default_result(validator_type)
+    @staticmethod
+    def _safe_parse_key(raw, key: str, validator_type: str) -> dict:
+        """Extract and normalise a nested sub-object from a batched LLM response."""
+        parsed = raw
+        if not isinstance(parsed, dict):
+            if not raw:
+                return TrustLayerVerification._default_result(validator_type)
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                try:
+                    start = raw.find("{")
+                    end = raw.rfind("}") + 1
+                    parsed = json.loads(raw[start:end]) if start >= 0 and end > start else {}
+                except Exception:
+                    parsed = {}
+        if not isinstance(parsed, dict):
+            return TrustLayerVerification._default_result(validator_type)
+        sub = parsed.get(key)
+        if not isinstance(sub, dict):
+            return TrustLayerVerification._default_result(validator_type)
+        return TrustLayerVerification._normalise(sub)
 
-    def _normalise(self, data: dict) -> dict:
+    @staticmethod
+    def _normalise(data: dict) -> dict:
         try:
             score = max(0, min(100, int(float(str(data.get("score", 50))))))
         except Exception:
@@ -607,7 +566,8 @@ Respond ONLY with valid JSON, no markdown:
             "sources": [str(s) for s in (data.get("sources") or []) if s][:5],
         }
 
-    def _default_result(self, validator_type: str) -> dict:
+    @staticmethod
+    def _default_result(validator_type: str) -> dict:
         return {
             "score": 45,
             "confidence": 35,

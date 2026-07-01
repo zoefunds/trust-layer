@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # GenLayer
     GENLAYER_STUDIO_URL: str = "https://studio.genlayer.com"
     GENLAYER_CONTRACT_ADDRESS: Optional[str] = None
+    # StudioNet sandbox account used to sign transactions (Hardhat default test key — safe for testnet-only use)
+    GENLAYER_PRIVATE_KEY: str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
     # Sentry
     SENTRY_DSN: Optional[str] = None

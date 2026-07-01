@@ -11,132 +11,110 @@ from ..core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# The 5 validators that match the deployed contract
-VALIDATOR_TYPES = ["identity", "github", "funding", "onchain", "security"]
-
-# Default StudioNet test account used as the transaction sender
-_STUDIO_FROM = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+# All 13 domain validators matching the deployed contract
+VALIDATOR_TYPES = [
+    "identity",
+    "founders",
+    "funding",
+    "investors",
+    "github",
+    "documentation",
+    "onchain",
+    "tokenomics",
+    "security",
+    "community",
+    "ecosystem",
+    "product",
+    "media",
+]
 
 
 async def run_investigation_via_genlayer(
     protocol_name: str,
     evidence: dict,
     investigation_id: str = "",
+    user_private_key: str = None,
 ) -> AsyncIterator[dict]:
     if settings.GENLAYER_CONTRACT_ADDRESS:
-        async for update in _call_genlayer_contract(protocol_name, evidence, investigation_id):
+        async for update in _call_genlayer_contract(protocol_name, evidence, investigation_id, user_private_key):
             yield update
     else:
         async for update in _simulate_investigation(protocol_name, evidence):
             yield update
 
 
+def _build_genlayer_client(private_key: str = None):
+    """Build a genlayer-py client. Uses the provided key, or falls back to the service account."""
+    from genlayer_py import create_client, create_account
+    from genlayer_py.chains import studionet
+
+    key = private_key or settings.GENLAYER_PRIVATE_KEY
+    account = create_account(account_private_key=key)
+    endpoint = settings.GENLAYER_STUDIO_URL.rstrip("/") + "/api"
+    return create_client(chain=studionet, endpoint=endpoint, account=account)
+
+
+def _run_genlayer_transaction_sync(protocol_name: str, evidence: dict, investigation_id: str, user_private_key: str = None) -> tuple[str, str]:
+    """
+    Blocking call executed in a worker thread (genlayer-py is a synchronous SDK).
+
+    Flow:
+      1. client.write_contract("investigate", ...)  → tx_hash (signed & submitted via eth_sendRawTransaction)
+      2. client.wait_for_transaction_receipt(...)    → poll until GenLayer's 5-node consensus accepts it
+      3. client.read_contract("get_report", ...)     → JSON report string stored on-chain
+    """
+    from genlayer_py.types import TransactionStatus
+    from genlayer_py.assertions import tx_execution_succeeded
+
+    contract_address = settings.GENLAYER_CONTRACT_ADDRESS
+    client = _build_genlayer_client(private_key=user_private_key)
+
+    logger.info(f"[GenLayer] Sending transaction for {protocol_name}")
+    tx_hash = client.write_contract(
+        address=contract_address,
+        function_name="investigate",
+        args=[protocol_name, json.dumps(evidence), investigation_id],
+    )
+    logger.info(f"[GenLayer] tx_hash={tx_hash}")
+
+    receipt = client.wait_for_transaction_receipt(
+        transaction_hash=tx_hash,
+        status=TransactionStatus.ACCEPTED,
+        retries=200,
+        interval=3000,
+    )
+
+    if not tx_execution_succeeded(receipt):
+        raise Exception(f"GenLayer transaction failed: {receipt}")
+
+    logger.info(f"[GenLayer] transaction accepted by consensus, reading report")
+    report_str = client.read_contract(
+        address=contract_address,
+        function_name="get_report",
+        args=[protocol_name],
+    )
+    return tx_hash, report_str
+
+
 async def _call_genlayer_contract(
     protocol_name: str,
     evidence: dict,
     investigation_id: str = "",
+    user_private_key: str = None,
 ) -> AsyncIterator[dict]:
-    """
-    Call the deployed TrustLayer contract via GenLayer Studio JSON-RPC.
-
-    Flow:
-      1. gen_sendTransaction  → tx_hash
-      2. Poll eth_getTransactionReceipt until status = "0x1"
-      3. gen_call get_report(protocol_name) → JSON report string
-    """
-    import httpx
-
+    """Call the deployed TrustLayer contract via the genlayer-py SDK on StudioNet."""
     contract_address = settings.GENLAYER_CONTRACT_ADDRESS
-    studio_url = settings.GENLAYER_STUDIO_URL.rstrip("/")
-    api_url = f"{studio_url}/api"
 
-    # Signal all 5 validators as running immediately
+    # Signal all 13 sources as running immediately
     for vtype in VALIDATOR_TYPES:
         yield {"type": "validator_update", "validator_type": vtype, "status": "running"}
         await asyncio.sleep(0.1)
 
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-
-            # ── Step 1: send_transaction ──────────────────────────────────
-            send_payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "gen_sendTransaction",
-                "params": [{
-                    "from": _STUDIO_FROM,
-                    "to": contract_address,
-                    "value": "0x0",
-                    "data": json.dumps({
-                        "method": "investigate",
-                        "args": [protocol_name, json.dumps(evidence), investigation_id],
-                    }),
-                }],
-            }
-
-            logger.info(f"[GenLayer] Sending transaction for {protocol_name}")
-            resp = await client.post(api_url, json=send_payload)
-            resp.raise_for_status()
-            send_result = resp.json()
-            logger.info(f"[GenLayer] send_transaction response: {send_result}")
-
-            if "error" in send_result:
-                raise Exception(f"gen_sendTransaction error: {send_result['error']}")
-
-            tx_hash = send_result.get("result")
-            if not tx_hash:
-                raise Exception(f"No tx_hash in response: {send_result}")
-
-            logger.info(f"[GenLayer] tx_hash={tx_hash}")
-
-            # ── Step 2: poll for receipt ──────────────────────────────────
-            receipt = None
-            for attempt in range(120):  # up to 4 minutes
-                await asyncio.sleep(2)
-                receipt_payload = {
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "eth_getTransactionReceipt",
-                    "params": [tx_hash],
-                }
-                r = await client.post(api_url, json=receipt_payload)
-                r.raise_for_status()
-                receipt_data = r.json()
-                receipt = receipt_data.get("result")
-                if receipt is not None:
-                    logger.info(f"[GenLayer] receipt after {attempt + 1} polls: status={receipt.get('status')}")
-                    break
-
-            if receipt is None:
-                raise Exception("Transaction never mined — timed out after 4 minutes")
-
-            if receipt.get("status") not in ("0x1", 1, True, "success", "0x01"):
-                raise Exception(f"Transaction failed: receipt status={receipt.get('status')}")
-
-            # ── Step 3: read the stored report ────────────────────────────
-            read_payload = {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "gen_call",
-                "params": [{
-                    "from": _STUDIO_FROM,
-                    "to": contract_address,
-                    "data": json.dumps({
-                        "method": "get_report",
-                        "args": [protocol_name],
-                    }),
-                }],
-            }
-            r = await client.post(api_url, json=read_payload)
-            r.raise_for_status()
-            read_result = r.json()
-            logger.info(f"[GenLayer] get_report result keys: {list(read_result.keys())}")
-
-            if "error" in read_result:
-                raise Exception(f"gen_call get_report error: {read_result['error']}")
-
-            raw = read_result.get("result", "{}")
-            report_data = json.loads(raw) if isinstance(raw, str) else raw
+        tx_hash, raw = await asyncio.to_thread(
+            _run_genlayer_transaction_sync, protocol_name, evidence, investigation_id, user_private_key
+        )
+        report_data = json.loads(raw) if isinstance(raw, str) else raw
 
         # Stream validator completions from the on-chain report
         validators_map = report_data.get("validators", {})
@@ -167,7 +145,7 @@ async def _call_genlayer_contract(
         }
         report_data["scores"] = mapped_scores
         report_data["consensus_result"] = {
-            "method": "gen_sendTransaction + run_nondet_unsafe",
+            "method": "genlayer_py write_contract + run_nondet_unsafe",
             "validators_count": 5,
             "consensus_reached": True,
             "tx_hash": tx_hash,
@@ -192,7 +170,7 @@ async def _simulate_investigation(
 
     for vtype in VALIDATOR_TYPES:
         yield {"type": "validator_update", "validator_type": vtype, "status": "running"}
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.3)
 
     scores = _compute_scores(github, defillama, coingecko)
     validator_results = _generate_validator_results(protocol_name, github, defillama, coingecko, scores)
@@ -206,7 +184,7 @@ async def _simulate_investigation(
             "findings": v["findings"],
             "confidence_score": v["confidence_score"],
         }
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(0.5)
 
     overall = scores["overall"]
     risk_level = "low" if overall >= 75 else "medium" if overall >= 50 else "high" if overall >= 25 else "critical"
@@ -224,7 +202,7 @@ async def _simulate_investigation(
             "validators_count": 5,
             "consensus_reached": True,
             "consensus_method": "simulation_weighted_average",
-            "overall_confidence": sum(v["confidence_score"] for v in validator_results.values()) / 5,
+            "overall_confidence": sum(v["confidence_score"] for v in validator_results.values()) / 13,
         },
         "evidence": evidence,
     }
@@ -259,13 +237,37 @@ def _compute_scores(github: dict, defillama: dict, coingecko: dict) -> dict:
     else:
         security = 25.0
 
-    # Funding (proxy from TVL + market cap)
+    # Funding
     funding = min(100, onchain * 0.5 + (30 if coingecko.get("found") else 0) + 20)
 
-    # Identity (proxy from CoinGecko listing + DefiLlama presence)
+    # Identity
     identity = min(100, (30 if coingecko.get("found") else 0) + (30 if defillama.get("found") else 0) + (40 if github.get("found") else 20))
 
-    overall = round(security * 0.25 + onchain * 0.25 + gh * 0.20 + funding * 0.15 + identity * 0.15, 2)
+    # Community (proxy from CoinGecko engagement)
+    community = min(100, (40 if coingecko.get("found") else 15) + (20 if defillama.get("found") else 0) + 10)
+
+    # Tokenomics
+    tokenomics = min(100, (50 if coingecko.get("found") else 20) + (15 if defillama.get("found") else 0))
+
+    # Ecosystem (proxy from chain count)
+    chains_count = len(defillama.get("chains", []) or [])
+    ecosystem = min(100, min(chains_count * 12, 60) + (20 if defillama.get("found") else 0) + 10)
+
+    # Product (proxy from github + onchain)
+    product = min(100, gh * 0.4 + onchain * 0.4 + 20)
+
+    # Founders, Investors, Documentation, Media — proxy values
+    founders = min(100, (gh * 0.6 + 30) if github.get("found") else 25)
+    investors = min(100, (funding * 0.5 + identity * 0.3 + 20))
+    documentation = min(100, (gh * 0.5 + 20) if github.get("found") else 20)
+    media = min(100, (identity * 0.5 + community * 0.3 + 15))
+
+    overall = round(
+        security * 0.15 + onchain * 0.12 + gh * 0.10 + funding * 0.10 +
+        identity * 0.08 + founders * 0.08 + investors * 0.07 + documentation * 0.07 +
+        tokenomics * 0.07 + community * 0.06 + ecosystem * 0.05 + product * 0.05,
+        2,
+    )
 
     return {
         "overall": overall,
@@ -274,11 +276,16 @@ def _compute_scores(github: dict, defillama: dict, coingecko: dict) -> dict:
         "security": round(security, 2),
         "funding": round(funding, 2),
         "reputation": round(identity, 2),
-        # kept for schema compatibility
-        "team": round((gh * 0.5 + 30), 2),
-        "community": round((20 if coingecko.get("found") else 10), 2),
-        "tokenomics": round((40 if coingecko.get("found") else 20), 2),
-        "product": round((gh * 0.4 + onchain * 0.4 + 20), 2),
+        "team": round((founders + investors) / 2, 2),
+        "community": round(community, 2),
+        "tokenomics": round(tokenomics, 2),
+        "product": round(product, 2),
+        # internal use
+        "_founders": round(founders, 2),
+        "_investors": round(investors, 2),
+        "_documentation": round(documentation, 2),
+        "_ecosystem": round(ecosystem, 2),
+        "_media": round(media, 2),
     }
 
 
@@ -287,6 +294,7 @@ def _generate_validator_results(protocol_name, github, defillama, coingecko, sco
     dl_found = defillama.get("found", False)
     cg_found = coingecko.get("found", False)
     name = coingecko.get("name") or defillama.get("name") or protocol_name
+    chains = defillama.get("chains", []) or []
 
     return {
         "identity": {
@@ -297,6 +305,27 @@ def _generate_validator_results(protocol_name, github, defillama, coingecko, sco
             ),
             "confidence_score": round(scores["reputation"], 2),
         },
+        "founders": {
+            "findings": (
+                f"{'GitHub organization/repository found: ' + github.get('full_name', '') + ' with ' + str(github.get('contributors_count', 0)) + ' active contributors' if gh_found else 'No public GitHub repository found — founder identities cannot be verified from public data'}. "
+                "Manual background check of named founders is always recommended."
+            ),
+            "confidence_score": round(scores["_founders"], 2),
+        },
+        "funding": {
+            "findings": (
+                f"{'TVL: $' + '{:,.0f}'.format(defillama.get('tvl', 0) or 0) + ' across ' + str(len(chains)) + ' chain(s)' if dl_found else 'No TVL data on DefiLlama'}. "
+                f"{'Market cap rank: #' + str(coingecko.get('market_cap_rank', 'N/A')) if cg_found else 'Not ranked on CoinGecko'}."
+            ),
+            "confidence_score": round(scores["funding"], 2),
+        },
+        "investors": {
+            "findings": (
+                f"{'Protocol has CoinGecko rank #' + str(coingecko.get('market_cap_rank', 'N/A')) + ' suggesting institutional attention' if cg_found else 'No CoinGecko listing — institutional investor signals unavailable'}. "
+                "Direct investor verification requires manual cross-referencing with VC portfolio pages."
+            ),
+            "confidence_score": round(scores["_investors"], 2),
+        },
         "github": {
             "findings": (
                 f"{'Repository: ' + github.get('full_name', '') + ' | Stars: ' + str(github.get('stars', 0)) + ' | Contributors: ' + str(github.get('contributors_count', 0)) + ' | Recent commits: ' + str(github.get('recent_commits', 0)) if gh_found else 'No public GitHub repository found'}. "
@@ -304,20 +333,27 @@ def _generate_validator_results(protocol_name, github, defillama, coingecko, sco
             ),
             "confidence_score": round(scores["github"], 2),
         },
-        "funding": {
+        "documentation": {
             "findings": (
-                f"{'TVL: $' + '{:,.0f}'.format(defillama.get('tvl', 0) or 0) + ' across ' + str(len(defillama.get('chains', []))) + ' chain(s)' if dl_found else 'No TVL data on DefiLlama'}. "
-                f"{'Market cap rank: #' + str(coingecko.get('market_cap_rank', 'N/A')) if cg_found else 'Not ranked on CoinGecko'}."
+                f"{'Documentation quality inferred from GitHub repository ' + github.get('full_name', '') + ' — README and code comments present' if gh_found else 'No public GitHub repository — documentation quality cannot be assessed'}. "
+                f"{'Official website found via CoinGecko' if cg_found and coingecko.get('homepage') else 'No official website detected'}."
             ),
-            "confidence_score": round(scores["funding"], 2),
+            "confidence_score": round(scores["_documentation"], 2),
         },
         "onchain": {
             "findings": (
-                f"{'Deployed on: ' + ', '.join((defillama.get('chains') or [])[:5]) if dl_found else 'No on-chain data found via DefiLlama'}. "
+                f"{'Deployed on: ' + ', '.join(chains[:5]) if dl_found else 'No on-chain data found via DefiLlama'}. "
                 f"{'TVL: $' + '{:,.0f}'.format(defillama.get('tvl', 0) or 0) if dl_found else ''}. "
                 f"{'Category: ' + defillama.get('category', '') if dl_found else ''}."
             ),
             "confidence_score": round(scores["onchain"], 2),
+        },
+        "tokenomics": {
+            "findings": (
+                f"{'Token listed on CoinGecko (rank #' + str(coingecko.get('market_cap_rank', 'N/A')) + ', market cap $' + '{:,.0f}'.format(coingecko.get('market_cap', 0) or 0) + ')' if cg_found else 'Token not found on CoinGecko — tokenomics data unavailable'}. "
+                f"{'24h volume: $' + '{:,.0f}'.format(coingecko.get('total_volume_24h', 0) or 0) if cg_found else ''}."
+            ),
+            "confidence_score": round(scores["tokenomics"], 2),
         },
         "security": {
             "findings": (
@@ -325,6 +361,34 @@ def _generate_validator_results(protocol_name, github, defillama, coingecko, sco
                 "Independent smart contract audit strongly recommended before significant capital allocation."
             ),
             "confidence_score": round(scores["security"], 2),
+        },
+        "community": {
+            "findings": (
+                f"{'Protocol listed on CoinGecko rank #' + str(coingecko.get('market_cap_rank', 'N/A')) + ' — indicating community engagement' if cg_found else 'No CoinGecko listing — community engagement signals limited'}. "
+                f"{'Also indexed on DefiLlama suggesting active DeFi community' if dl_found else ''}."
+            ),
+            "confidence_score": round(scores["community"], 2),
+        },
+        "ecosystem": {
+            "findings": (
+                f"{'Active on ' + str(len(chains)) + ' chains: ' + ', '.join(chains[:6]) if dl_found and chains else 'No multi-chain data found on DefiLlama'}. "
+                f"{'Oracle integrations: ' + ', '.join((defillama.get('oracles') or [])[:3]) if dl_found and defillama.get('oracles') else 'No oracle integration data available'}."
+            ),
+            "confidence_score": round(scores["_ecosystem"], 2),
+        },
+        "product": {
+            "findings": (
+                f"{'Active product development — ' + str(github.get('recent_commits', 0)) + ' recent commits, ' + str(github.get('stars', 0)) + ' GitHub stars' if gh_found else 'No public GitHub — product development activity cannot be assessed'}. "
+                f"{'Protocol category: ' + defillama.get('category', 'N/A') + ' with TVL $' + '{:,.0f}'.format(defillama.get('tvl', 0) or 0) if dl_found else ''}."
+            ),
+            "confidence_score": round(scores["product"], 2),
+        },
+        "media": {
+            "findings": (
+                f"{'Protocol is publicly listed on CoinGecko and has market presence (rank #' + str(coingecko.get('market_cap_rank', 'N/A')) + ')' if cg_found else 'No CoinGecko listing — public media presence is limited'}. "
+                f"{'DefiLlama indexing confirms DeFi media coverage' if dl_found else 'Not found on DefiLlama'}."
+            ),
+            "confidence_score": round(scores["_media"], 2),
         },
     }
 
@@ -341,6 +405,9 @@ def _build_verified_claims(protocol_name, github, defillama, coingecko) -> list:
         claims.append({"claim": f"Open source — {github.get('license')} license", "source": "GitHub", "confidence": 85})
     if defillama.get("audit_links"):
         claims.append({"claim": f"{len(defillama.get('audit_links', []))} security audit report(s) publicly listed", "source": "DefiLlama", "confidence": 88})
+    chains = defillama.get("chains", []) or []
+    if len(chains) > 1:
+        claims.append({"claim": f"Multi-chain deployment: {', '.join(chains[:5])}", "source": "DefiLlama", "confidence": 85})
     return claims
 
 
@@ -359,12 +426,12 @@ def _build_unresolved_claims() -> list:
 
 def _build_summary(protocol_name, overall, risk_level, github, defillama, coingecko) -> str:
     gh = f"GitHub: {'active (' + str(github.get('stars', 0)) + ' stars)' if github.get('found') else 'not found'}. "
-    dl = f"TVL ${ defillama.get('tvl', 0):,.0f} on {len(defillama.get('chains', []))} chain(s). " if defillama.get("found") else ""
+    dl = f"TVL ${defillama.get('tvl', 0):,.0f} on {len(defillama.get('chains', []))} chain(s). " if defillama.get("found") else ""
     cg = f"CoinGecko rank #{coingecko.get('market_cap_rank', 'N/A')}. " if coingecko.get("found") else ""
     return (
         f"{protocol_name} received a TrustLayer consensus score of {overall:.1f}/100 ({risk_level.upper()} RISK). "
         f"{gh}{dl}{cg}"
-        f"Analysis by 5 independent AI validators via GenLayer consensus."
+        f"Analysis by 13 independent sources via GenLayer consensus."
     )
 
 

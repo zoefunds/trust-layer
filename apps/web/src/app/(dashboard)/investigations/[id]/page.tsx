@@ -8,16 +8,25 @@ import { VALIDATOR_LABELS } from "@/types";
 import type { SSEEvent, ValidatorType } from "@/types";
 import { getTrustColor, getRiskColor, getRiskLabel, formatDate } from "@/lib/utils";
 import {
-  Shield, GitBranch, DollarSign, Link2, Lock,
-  CheckCircle2, XCircle, Clock, AlertTriangle, ArrowLeft,
+  Shield, GitBranch, Users, DollarSign, Globe, Lock,
+  FileText, Link2, Coins, MessageCircle, Package, Radio,
+  Briefcase, CheckCircle2, XCircle, Clock, AlertTriangle, ArrowLeft,
 } from "lucide-react";
 
 const VALIDATOR_ICONS: Record<ValidatorType, React.ElementType> = {
   identity: Shield,
-  github: GitBranch,
+  founders: Users,
   funding: DollarSign,
+  investors: Briefcase,
+  github: GitBranch,
+  documentation: FileText,
   onchain: Link2,
+  tokenomics: Coins,
   security: Lock,
+  community: MessageCircle,
+  ecosystem: Globe,
+  product: Package,
+  media: Radio,
 };
 
 const SCORE_CATEGORIES = [
@@ -71,6 +80,7 @@ export default function InvestigationPage() {
   const report = current.report;
   const isRunning = current.status === "running" || current.status === "pending";
   const completedValidators = validators.filter((v) => v.status === "completed").length;
+  const totalValidators = validators.length || 13;
   const progress = validators.length > 0 ? (completedValidators / validators.length) * 100 : 0;
 
   const statusColor = current.status === "completed" ? "#10B981" : current.status === "running" ? "#2563EB" : current.status === "failed" ? "#EF4444" : "#64748B";
@@ -134,13 +144,13 @@ export default function InvestigationPage() {
               <span style={{ fontSize: 13, fontWeight: 600 }}>Investigation Running</span>
               <span style={{ fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>GenLayer consensus active</span>
             </div>
-            <span style={{ fontSize: 12, fontFamily: "monospace", color: "#64748B" }}>{completedValidators}/{validators.length || 5}</span>
+            <span style={{ fontSize: 12, fontFamily: "monospace", color: "#64748B" }}>{completedValidators}/{totalValidators}</span>
           </div>
           <div style={{ height: 6, borderRadius: 99, background: "#1C2333", overflow: "hidden" }}>
             <div style={{ height: "100%", background: "linear-gradient(90deg, #2563EB, #10B981)", borderRadius: 99, width: `${progress}%`, transition: "width 0.5s ease" }} />
           </div>
           <div style={{ marginTop: 10, fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>
-            {progress.toFixed(0)}% complete · Running 5 independent AI validators…
+            {progress.toFixed(0)}% complete · Running 13 sources…
           </div>
         </div>
       )}
@@ -152,7 +162,7 @@ export default function InvestigationPage() {
         <div style={{ borderRadius: 16, border: "1px solid #1C2333", background: "#0D1117", overflow: "hidden", alignSelf: "start", position: "sticky", top: 84 }}>
           <div style={{ padding: "14px 18px", borderBottom: "1px solid #1C2333", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: "#94A3B8" }}>Validators</span>
-            <span style={{ fontSize: 11, fontFamily: "monospace", color: "#64748B" }}>{completedValidators}/{validators.length || 5}</span>
+            <span style={{ fontSize: 11, fontFamily: "monospace", color: "#64748B" }}>{completedValidators}/{totalValidators}</span>
           </div>
           <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
             {(validators.length > 0
@@ -307,7 +317,7 @@ export default function InvestigationPage() {
           {current.status === "pending" && validators.length === 0 && (
             <div style={{ borderRadius: 16, border: "1px solid #1C2333", background: "#0D1117", padding: "60px", textAlign: "center" }}>
               <span style={{ width: 32, height: 32, border: "2px solid rgba(37,99,235,0.3)", borderTopColor: "#2563EB", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", marginBottom: 16 }} />
-              <div style={{ fontSize: 13, color: "#64748B" }}>Initializing validators…</div>
+              <div style={{ fontSize: 13, color: "#64748B" }}>Initializing 13 sources…</div>
             </div>
           )}
         </div>

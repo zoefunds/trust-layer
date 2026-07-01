@@ -111,6 +111,7 @@ async def create_investigation(
         req.protocol_name,
         current_user.id,
         current_user.email,
+        current_user.encrypted_private_key,
     )
 
     result = await db.execute(
@@ -127,6 +128,7 @@ async def _run_investigation_background(
     protocol_name: str,
     user_id: str,
     user_email: str,
+    encrypted_private_key: str = None,
 ):
     from ..core.database import AsyncSessionLocal
 
@@ -141,9 +143,19 @@ async def _run_investigation_background(
             # Collect evidence
             evidence = await collect_all_evidence(protocol_name)
 
+            # Decrypt the user's wallet private key for signing
+            user_private_key = None
+            if encrypted_private_key:
+                from ..core.security import decrypt_private_key
+                try:
+                    user_private_key = decrypt_private_key(encrypted_private_key)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to decrypt user wallet, using service account: {e}")
+
             # Run GenLayer investigation
             final_report_data = None
-            async for event in run_investigation_via_genlayer(protocol_name, evidence, investigation_id):
+            async for event in run_investigation_via_genlayer(protocol_name, evidence, investigation_id, user_private_key=user_private_key):
                 if event["type"] == "validator_update":
                     result = await db.execute(
                         select(Validator).where(
@@ -259,6 +271,8 @@ async def stream_investigation(
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    from ..core.database import AsyncSessionLocal
+
     async def event_generator():
         last_statuses = {}
         for _ in range(300):  # max 5 min polling
@@ -266,7 +280,6 @@ async def stream_investigation(
                 break
 
             async with AsyncSessionLocal() as poll_db:
-                from ..core.database import AsyncSessionLocal
                 result = await poll_db.execute(
                     select(Investigation)
                     .options(selectinload(Investigation.validators), selectinload(Investigation.report))
@@ -302,5 +315,4 @@ async def stream_investigation(
 
             await asyncio.sleep(1)
 
-    from ..core.database import AsyncSessionLocal
     return EventSourceResponse(event_generator())
