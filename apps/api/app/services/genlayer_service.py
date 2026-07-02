@@ -125,7 +125,7 @@ async def _call_genlayer_contract(
                 "validator_type": vtype,
                 "status": "completed",
                 "findings": vdata.get("findings", ""),
-                "confidence_score": float(vdata.get("confidence", vdata.get("confidence_score", 50.0))),
+                "confidence_score": float(vdata.get("score", vdata.get("confidence", vdata.get("confidence_score", 50.0)))),
                 "verified_claims": vdata.get("verified_claims", []),
                 "disputed_claims": vdata.get("disputed_claims", []),
                 "sources": vdata.get("sources", []),
