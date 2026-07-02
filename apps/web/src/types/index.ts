@@ -38,6 +38,8 @@ export interface Validator {
   findings: string | null;
   confidence_score: number | null;
   sources: string[] | null;
+  verified_claims: string[] | null;
+  disputed_claims: string[] | null;
   created_at: string;
 }
 

@@ -170,10 +170,23 @@ async def _run_investigation_background(
                             v.findings = event["findings"]
                         if event.get("confidence_score"):
                             v.confidence_score = event["confidence_score"]
+                        if event.get("sources") is not None:
+                            v.sources = event["sources"]
+                        if event.get("verified_claims") is not None:
+                            v.verified_claims = event["verified_claims"]
+                        if event.get("disputed_claims") is not None:
+                            v.disputed_claims = event["disputed_claims"]
                         await db.commit()
 
                 elif event["type"] == "completed":
                     final_report_data = event["report"]
+                    # Persist tx_hash on the investigation row
+                    tx_hash = (final_report_data.get("consensus_result") or {}).get("tx_hash")
+                    if tx_hash:
+                        result = await db.execute(select(Investigation).where(Investigation.id == investigation_id))
+                        inv_row = result.scalar_one()
+                        inv_row.tx_hash = tx_hash
+                        await db.commit()
 
             # Save report
             if final_report_data:

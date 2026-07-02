@@ -32,6 +32,8 @@ class Validator(Base):
     findings: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     confidence_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
     sources: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    verified_claims: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    disputed_claims: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     investigation: Mapped["Investigation"] = relationship("Investigation", back_populates="validators")
