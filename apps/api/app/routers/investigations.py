@@ -313,6 +313,9 @@ async def stream_investigation(
                                     "status": v.status,
                                     "findings": v.findings,
                                     "confidence_score": float(v.confidence_score) if v.confidence_score else None,
+                                    "sources": v.sources,
+                                    "verified_claims": v.verified_claims,
+                                    "disputed_claims": v.disputed_claims,
                                 },
                             })
                         }
