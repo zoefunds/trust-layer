@@ -59,6 +59,8 @@ def _inv_to_response(inv: Investigation) -> dict:
             "findings": v.findings,
             "confidence_score": float(v.confidence_score) if v.confidence_score else None,
             "sources": v.sources,
+            "verified_claims": v.verified_claims,
+            "disputed_claims": v.disputed_claims,
             "created_at": v.created_at.isoformat(),
         }
         for v in (inv.validators or [])
