@@ -159,6 +159,9 @@ export default function InvestigationPage() {
             status: event.data.status,
             findings: event.data.findings || null,
             confidence_score: event.data.confidence_score || null,
+            sources: event.data.sources || null,
+            verified_claims: event.data.verified_claims || null,
+            disputed_claims: event.data.disputed_claims || null,
           });
         }
         if (event.type === "completed") { setCurrentStatus("completed"); fetchOne(id); sse.close(); }

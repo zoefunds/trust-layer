@@ -98,6 +98,9 @@ export interface SSEEvent {
     status?: ValidatorStatus;
     findings?: string;
     confidence_score?: number;
+    sources?: string[];
+    verified_claims?: string[];
+    disputed_claims?: string[];
     progress?: number;
     message?: string;
     report?: Report;
