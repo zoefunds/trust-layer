@@ -129,11 +129,129 @@ class TrustLayerVerification(gl.Contract):
     # ─────────────────────────────────────────────────────────────────────
 
     @staticmethod
+    def _fetch_web_evidence(protocol_name: str) -> dict:
+        """
+        Fetch live data from CoinGecko, DefiLlama, and GitHub directly
+        from within the intelligent contract using gl.nondet.get_webpage.
+        Returns a dict with keys: coingecko, defillama, github.
+        """
+        slug = protocol_name.lower().strip().replace(" ", "-")
+
+        # ── CoinGecko ──────────────────────────────────────────────────
+        coingecko = {"found": False}
+        try:
+            cg_search_raw = gl.nondet.get_webpage(
+                "https://api.coingecko.com/api/v3/search?query=" + slug,
+                mode="text",
+            )
+            cg_search = json.loads(cg_search_raw) if isinstance(cg_search_raw, str) else cg_search_raw
+            coins = cg_search.get("coins", [])
+            if coins:
+                coin_id = coins[0].get("id", slug)
+                cg_detail_raw = gl.nondet.get_webpage(
+                    "https://api.coingecko.com/api/v3/coins/" + coin_id
+                    + "?localization=false&tickers=false&community_data=false&developer_data=false",
+                    mode="text",
+                )
+                cg = json.loads(cg_detail_raw) if isinstance(cg_detail_raw, str) else cg_detail_raw
+                market = cg.get("market_data", {})
+                coingecko = {
+                    "found": True,
+                    "name": cg.get("name", ""),
+                    "market_cap_rank": cg.get("market_cap_rank"),
+                    "market_cap": (market.get("market_cap") or {}).get("usd", 0),
+                    "total_volume_24h": (market.get("total_volume") or {}).get("usd", 0),
+                    "price_change_7d": market.get("price_change_percentage_7d"),
+                    "genesis_date": cg.get("genesis_date", "unknown"),
+                    "homepage": ((cg.get("links") or {}).get("homepage") or [""])[0],
+                }
+        except Exception:
+            pass
+
+        # ── DefiLlama ──────────────────────────────────────────────────
+        defillama = {"found": False}
+        try:
+            dl_raw = gl.nondet.get_webpage(
+                "https://api.llama.fi/protocol/" + slug,
+                mode="text",
+            )
+            dl = json.loads(dl_raw) if isinstance(dl_raw, str) else dl_raw
+            if dl.get("name"):
+                defillama = {
+                    "found": True,
+                    "name": dl.get("name", ""),
+                    "category": dl.get("category", ""),
+                    "tvl": dl.get("tvl", 0),
+                    "tvl_change_24h": dl.get("change_1d"),
+                    "tvl_change_7d": dl.get("change_7d"),
+                    "chains": dl.get("chains", []),
+                    "oracles": dl.get("oracles", []),
+                    "audit_links": dl.get("audit_links", []),
+                    "audits": dl.get("audits"),
+                    "mcap_tvl": dl.get("mcap/tvl"),
+                    "url": dl.get("url", ""),
+                }
+        except Exception:
+            pass
+
+        # ── GitHub ─────────────────────────────────────────────────────
+        github = {"found": False}
+        try:
+            gh_search_raw = gl.nondet.get_webpage(
+                "https://api.github.com/search/repositories?q=" + slug + "+in:name&per_page=1",
+                mode="text",
+            )
+            gh_search = json.loads(gh_search_raw) if isinstance(gh_search_raw, str) else gh_search_raw
+            items = gh_search.get("items", [])
+            if items:
+                repo = items[0]
+                full_name = repo.get("full_name", "")
+                contrib_raw = gl.nondet.get_webpage(
+                    "https://api.github.com/repos/" + full_name + "/contributors?per_page=1&anon=true",
+                    mode="text",
+                )
+                contrib_list = json.loads(contrib_raw) if isinstance(contrib_raw, str) else contrib_raw
+                contrib_count = len(contrib_list) if isinstance(contrib_list, list) else 0
+                # GitHub search API doesn't return total contributor count in headers,
+                # but we can get it from the repo stats endpoint
+                try:
+                    contrib_all_raw = gl.nondet.get_webpage(
+                        "https://api.github.com/repos/" + full_name + "/contributors?per_page=100&anon=true",
+                        mode="text",
+                    )
+                    contrib_all = json.loads(contrib_all_raw) if isinstance(contrib_all_raw, str) else contrib_all_raw
+                    contrib_count = len(contrib_all) if isinstance(contrib_all, list) else contrib_count
+                except Exception:
+                    pass
+                github = {
+                    "found": True,
+                    "full_name": full_name,
+                    "stars": repo.get("stargazers_count", 0),
+                    "forks": repo.get("forks_count", 0),
+                    "open_issues": repo.get("open_issues_count", 0),
+                    "language": repo.get("language", ""),
+                    "description": (repo.get("description") or "")[:120],
+                    "license": (repo.get("license") or {}).get("name", ""),
+                    "is_archived": repo.get("archived", False),
+                    "contributors_count": contrib_count,
+                    "recent_commits": 0,
+                }
+        except Exception:
+            pass
+
+        return {"coingecko": coingecko, "defillama": defillama, "github": github}
+
+    @staticmethod
     def _run_pipeline(protocol_name: str, evidence: dict) -> str:
         """
         Execute 5 batched LLM calls (each covering 2-3 of the 13 sources) and
         synthesise the final report. Called exclusively on the leader node
         inside run_nondet_unsafe.
+
+        The leader node first fetches live data from the web (CoinGecko,
+        DefiLlama, GitHub) using gl.nondet.get_webpage, then merges it with
+        any pre-collected evidence passed by the caller. Web-fetched data
+        takes priority so validators always work with the freshest signals.
 
         Batching (rather than 13 sequential LLM round-trips) keeps total leader
         execution time well under GenVM's execution timeout — 13 sequential
@@ -145,9 +263,11 @@ class TrustLayerVerification(gl.Contract):
         GenVM's "pickling storage class" warning when the closure is shipped
         into the nondet sandbox.
         """
-        github = evidence.get("github", {})
-        defillama = evidence.get("defillama", {})
-        coingecko = evidence.get("coingecko", {})
+        web_evidence = TrustLayerVerification._fetch_web_evidence(protocol_name)
+
+        github = {**evidence.get("github", {}), **{k: v for k, v in web_evidence["github"].items() if v}}
+        defillama = {**evidence.get("defillama", {}), **{k: v for k, v in web_evidence["defillama"].items() if v}}
+        coingecko = {**evidence.get("coingecko", {}), **{k: v for k, v in web_evidence["coingecko"].items() if v}}
 
         # ── Batch 1: Identity, Founders, Investors ─────────────────────
         batch1 = gl.nondet.exec_prompt(

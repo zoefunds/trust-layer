@@ -12,7 +12,7 @@ TrustLayer lets anyone investigate a DeFi protocol in under two minutes. It pull
 2. The API collects live evidence: GitHub repo stats, DefiLlama TVL & audit links, CoinGecko token data.
 3. That evidence payload is passed to the `TrustLayer` intelligent contract deployed on **GenLayer StudioNet** via the `genlayer-py` SDK.
 4. Inside the contract, `gl.vm.run_nondet_unsafe` runs the investigation:
-   - The **leader** node executes 5 batched LLM calls covering all 13 source domains.
+   - The **leader** node fetches live data directly from the web using `gl.nondet.get_webpage` (CoinGecko, DefiLlama, GitHub APIs), merges it with any pre-collected evidence, then executes 5 batched LLM calls covering all 13 source domains.
    - The **4 validator** nodes verify the JSON shape and score ranges, then vote on consensus.
 5. Once the transaction is `FINALIZED` (typically 60–90 seconds), the on-chain report is read back and saved to the database.
 6. The user receives a score, per-source findings, verified/disputed/unresolved claims, and a risk recommendation.
@@ -61,6 +61,7 @@ Each investigation runs analysis across 13 independent domain sources:
 
 ### Smart Contract (`contracts/trust_layer.py`)
 - **GenLayer Intelligent Contract** — Python contract executed by GenLayer's GenVM
+- **In-contract web access** — `gl.nondet.get_webpage` fetches live data from CoinGecko, DefiLlama, and GitHub APIs directly inside the contract, so validators work with the freshest on-chain evidence
 - **5 LLM batches** covering all 13 sources (avoids the 600s GenVM leader execution timeout)
 - `@staticmethod` pipeline — avoids GenVM pickling warnings from `self` capture in closures
 - `gl.vm.run_nondet_unsafe(leader_fn, validator_fn)` — leader runs the full LLM pipeline; validators check JSON shape and score ranges only
@@ -111,7 +112,7 @@ BREVO_API_KEY=your-brevo-key
 BREVO_SENDER_EMAIL=you@yourdomain.com
 WALLET_ENCRYPTION_KEY=<32-byte hex, e.g. openssl rand -hex 32>
 GENLAYER_STUDIO_URL=https://studio.genlayer.com
-GENLAYER_CONTRACT_ADDRESS=0x87E814428990b907FaC8DD87Be04c33b8094252c
+GENLAYER_CONTRACT_ADDRESS=0xf9a024a2c4039DD9d10a6Ba329EFa69ADA279fd4
 GENLAYER_PRIVATE_KEY=<your StudioNet account private key>
 FRONTEND_URL=http://localhost:3000
 ```
@@ -172,7 +173,7 @@ fly secrets set \
   REDIS_URL=... \
   BREVO_API_KEY=... \
   WALLET_ENCRYPTION_KEY=... \
-  GENLAYER_CONTRACT_ADDRESS=0x87E814428990b907FaC8DD87Be04c33b8094252c \
+  GENLAYER_CONTRACT_ADDRESS=0xf9a024a2c4039DD9d10a6Ba329EFa69ADA279fd4 \
   GENLAYER_PRIVATE_KEY=...
 ```
 
