@@ -39,7 +39,8 @@ async def run_investigation_via_genlayer(
         async for update in _call_genlayer_contract(protocol_name, evidence, investigation_id, user_private_key):
             yield update
     else:
-        async for update in _simulate_investigation(protocol_name, evidence):
+        logger.warning("[GenLayer] No contract address configured — using off-chain simulation")
+        async for update in _simulate_investigation(protocol_name, evidence, is_fallback=True):
             yield update
 
 
@@ -158,15 +159,16 @@ async def _call_genlayer_contract(
 
     except Exception as e:
         logger.error(f"[GenLayer] Contract call failed — falling back to simulation: {e}")
-        async for update in _simulate_investigation(protocol_name, evidence):
+        async for update in _simulate_investigation(protocol_name, evidence, is_fallback=True):
             yield update
 
 
 async def _simulate_investigation(
     protocol_name: str,
     evidence: dict,
+    is_fallback: bool = False,
 ) -> AsyncIterator[dict]:
-    """Off-chain simulation used as fallback when contract call fails."""
+    """Off-chain simulation — used as fallback when contract call fails or when no contract is configured."""
     github = evidence.get("github", {})
     defillama = evidence.get("defillama", {})
     coingecko = evidence.get("coingecko", {})
@@ -192,19 +194,25 @@ async def _simulate_investigation(
     overall = scores["overall"]
     risk_level = "low" if overall >= 75 else "medium" if overall >= 50 else "high" if overall >= 25 else "critical"
 
+    summary_text = _build_summary(protocol_name, overall, risk_level, github, defillama, coingecko)
+    if is_fallback:
+        summary_text = "[SIMULATED — GenLayer contract call failed, this is an off-chain estimate] " + summary_text
+
     report = {
         "scores": scores,
         "risk_level": risk_level,
+        "simulated": True,
         "validators": validator_results,
         "verified_claims": _build_verified_claims(protocol_name, github, defillama, coingecko),
         "disputed_claims": _build_disputed_claims(github, coingecko),
         "unresolved_claims": _build_unresolved_claims(),
-        "summary": _build_summary(protocol_name, overall, risk_level, github, defillama, coingecko),
+        "summary": summary_text,
         "recommendation": _build_recommendation(protocol_name, overall, risk_level),
         "consensus_result": {
-            "validators_count": 5,
-            "consensus_reached": True,
-            "consensus_method": "simulation_weighted_average",
+            "validators_count": 0,
+            "consensus_reached": False,
+            "consensus_method": "off_chain_simulation",
+            "simulated": True,
             "overall_confidence": sum(v["confidence_score"] for v in validator_results.values()) / 13,
         },
         "evidence": evidence,

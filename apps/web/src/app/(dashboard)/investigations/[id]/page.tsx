@@ -276,12 +276,23 @@ export default function InvestigationPage() {
         </div>
       )}
 
+      {/* Simulated report warning */}
+      {consensusResult?.simulated && (
+        <div style={{ borderRadius: 12, border: "1px solid #92400E", background: "rgba(245,158,11,0.08)", padding: "12px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 10 }}>
+          <AlertTriangle style={{ width: 16, height: 16, color: "#F59E0B", flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#F59E0B" }}>Simulated Report — Not On-Chain</div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>This report was generated off-chain because the GenLayer contract call failed. It is an estimate only and has not been verified by network consensus.</div>
+          </div>
+        </div>
+      )}
+
       {/* Consensus metadata bar */}
       {consensusResult && (
-        <div style={{ borderRadius: 12, border: "1px solid #1C2333", background: "#0D1117", padding: "12px 20px", marginBottom: 20, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 24 }}>
+        <div style={{ borderRadius: 12, border: `1px solid ${consensusResult.simulated ? "#92400E" : "#1C2333"}`, background: "#0D1117", padding: "12px 20px", marginBottom: 20, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 24 }}>
           <div>
             <div style={{ fontSize: 9, fontFamily: "monospace", color: "#64748B", marginBottom: 2 }}>CONSENSUS METHOD</div>
-            <div style={{ fontSize: 11, color: "#94A3B8" }}>{String(consensusResult.method ?? "GenLayer run_nondet_unsafe")}</div>
+            <div style={{ fontSize: 11, color: consensusResult.simulated ? "#F59E0B" : "#94A3B8" }}>{consensusResult.simulated ? "Off-chain Simulation (Fallback)" : String(consensusResult.method ?? "GenLayer run_nondet_unsafe")}</div>
           </div>
           <div style={{ width: 1, height: 28, background: "#1C2333" }} />
           <div>

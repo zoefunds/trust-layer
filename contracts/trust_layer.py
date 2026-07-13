@@ -194,7 +194,7 @@ class TrustLayerVerification(gl.Contract):
         except Exception:
             pass
 
-        # ── GitHub ─────────────────────────────────────────────────────
+        # ── GitHub (single search call — repo stats are in the response) ─
         github = {"found": False}
         try:
             gh_search_raw = gl.nondet.get_webpage(
@@ -205,27 +205,9 @@ class TrustLayerVerification(gl.Contract):
             items = gh_search.get("items", [])
             if items:
                 repo = items[0]
-                full_name = repo.get("full_name", "")
-                contrib_raw = gl.nondet.get_webpage(
-                    "https://api.github.com/repos/" + full_name + "/contributors?per_page=1&anon=true",
-                    mode="text",
-                )
-                contrib_list = json.loads(contrib_raw) if isinstance(contrib_raw, str) else contrib_raw
-                contrib_count = len(contrib_list) if isinstance(contrib_list, list) else 0
-                # GitHub search API doesn't return total contributor count in headers,
-                # but we can get it from the repo stats endpoint
-                try:
-                    contrib_all_raw = gl.nondet.get_webpage(
-                        "https://api.github.com/repos/" + full_name + "/contributors?per_page=100&anon=true",
-                        mode="text",
-                    )
-                    contrib_all = json.loads(contrib_all_raw) if isinstance(contrib_all_raw, str) else contrib_all_raw
-                    contrib_count = len(contrib_all) if isinstance(contrib_all, list) else contrib_count
-                except Exception:
-                    pass
                 github = {
                     "found": True,
-                    "full_name": full_name,
+                    "full_name": repo.get("full_name", ""),
                     "stars": repo.get("stargazers_count", 0),
                     "forks": repo.get("forks_count", 0),
                     "open_issues": repo.get("open_issues_count", 0),
@@ -233,7 +215,7 @@ class TrustLayerVerification(gl.Contract):
                     "description": (repo.get("description") or "")[:120],
                     "license": (repo.get("license") or {}).get("name", ""),
                     "is_archived": repo.get("archived", False),
-                    "contributors_count": contrib_count,
+                    "contributors_count": 0,
                     "recent_commits": 0,
                 }
         except Exception:
