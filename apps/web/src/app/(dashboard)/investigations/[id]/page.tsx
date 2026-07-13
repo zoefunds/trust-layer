@@ -195,6 +195,7 @@ export default function InvestigationPage() {
 
   const txHash = current.tx_hash || (report?.consensus_result as Record<string, string> | null)?.tx_hash;
   const consensusResult = report?.consensus_result as Record<string, unknown> | null;
+  const isSimulated = Boolean(isSimulated);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px", fontFamily: "system-ui,-apple-system,sans-serif", color: "#E2E8F0" }}>
@@ -277,7 +278,7 @@ export default function InvestigationPage() {
       )}
 
       {/* Simulated report warning */}
-      {consensusResult?.simulated && (
+      {isSimulated && (
         <div style={{ borderRadius: 12, border: "1px solid #92400E", background: "rgba(245,158,11,0.08)", padding: "12px 20px", marginBottom: 20, display: "flex", alignItems: "center", gap: 10 }}>
           <AlertTriangle style={{ width: 16, height: 16, color: "#F59E0B", flexShrink: 0 }} />
           <div>
@@ -289,10 +290,10 @@ export default function InvestigationPage() {
 
       {/* Consensus metadata bar */}
       {consensusResult && (
-        <div style={{ borderRadius: 12, border: `1px solid ${consensusResult.simulated ? "#92400E" : "#1C2333"}`, background: "#0D1117", padding: "12px 20px", marginBottom: 20, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 24 }}>
+        <div style={{ borderRadius: 12, border: `1px solid ${isSimulated ? "#92400E" : "#1C2333"}`, background: "#0D1117", padding: "12px 20px", marginBottom: 20, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 24 }}>
           <div>
             <div style={{ fontSize: 9, fontFamily: "monospace", color: "#64748B", marginBottom: 2 }}>CONSENSUS METHOD</div>
-            <div style={{ fontSize: 11, color: consensusResult.simulated ? "#F59E0B" : "#94A3B8" }}>{consensusResult.simulated ? "Off-chain Simulation (Fallback)" : String(consensusResult.method ?? "GenLayer run_nondet_unsafe")}</div>
+            <div style={{ fontSize: 11, color: isSimulated ? "#F59E0B" : "#94A3B8" }}>{isSimulated ? "Off-chain Simulation (Fallback)" : String(consensusResult.method ?? "GenLayer run_nondet_unsafe")}</div>
           </div>
           <div style={{ width: 1, height: 28, background: "#1C2333" }} />
           <div>

@@ -90,7 +90,7 @@ export default function InvestigationsPage() {
                       <div style={{ fontSize: 11, color: getRiskColor(inv.report.risk_level) }}>
                         {getRiskLabel(inv.report.risk_level)}
                       </div>
-                      {(inv.report.consensus_result as Record<string, unknown> | null)?.simulated && (
+                      {Boolean((inv.report.consensus_result as Record<string, unknown> | null)?.simulated) && (
                         <div style={{ fontSize: 9, fontFamily: "monospace", color: "#F59E0B", marginTop: 2, padding: "1px 6px", borderRadius: 4, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", display: "inline-block" }}>
                           SIMULATED
                         </div>
