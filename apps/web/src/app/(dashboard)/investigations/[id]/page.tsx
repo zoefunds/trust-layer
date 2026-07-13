@@ -195,7 +195,7 @@ export default function InvestigationPage() {
 
   const txHash = current.tx_hash || (report?.consensus_result as Record<string, string> | null)?.tx_hash;
   const consensusResult = report?.consensus_result as Record<string, unknown> | null;
-  const isSimulated = Boolean(isSimulated);
+  const isSimulated = Boolean(consensusResult?.simulated);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px", fontFamily: "system-ui,-apple-system,sans-serif", color: "#E2E8F0" }}>
