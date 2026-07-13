@@ -152,7 +152,9 @@ async def _call_genlayer_contract(
             "method": "genlayer_py write_contract + run_nondet_unsafe",
             "validators_count": 5,
             "consensus_reached": True,
+            "simulated": False,
             "tx_hash": tx_hash,
+            "overall_confidence": report_data.get("consensus_confidence", None),
         }
 
         yield {"type": "completed", "report": report_data}
@@ -180,6 +182,18 @@ async def _simulate_investigation(
     scores = _compute_scores(github, defillama, coingecko)
     validator_results = _generate_validator_results(protocol_name, github, defillama, coingecko, scores)
 
+    source_map = {
+        "identity": ["CoinGecko", "DefiLlama"], "founders": ["GitHub"], "funding": ["DefiLlama", "CoinGecko"],
+        "investors": ["CoinGecko"], "github": ["GitHub"], "documentation": ["GitHub", "Web"],
+        "onchain": ["DefiLlama"], "tokenomics": ["CoinGecko"], "security": ["DefiLlama"],
+        "community": ["CoinGecko"], "ecosystem": ["DefiLlama"], "product": ["GitHub", "DefiLlama"],
+        "media": ["CoinGecko", "Web"],
+    }
+    for vtype, vdata in validator_results.items():
+        vdata.setdefault("sources", source_map.get(vtype, []))
+        vdata.setdefault("verified_claims", [])
+        vdata.setdefault("disputed_claims", [])
+
     for vtype in VALIDATOR_TYPES:
         v = validator_results[vtype]
         yield {
@@ -188,6 +202,9 @@ async def _simulate_investigation(
             "status": "completed",
             "findings": v["findings"],
             "confidence_score": v["confidence_score"],
+            "sources": v.get("sources", []),
+            "verified_claims": v.get("verified_claims", []),
+            "disputed_claims": v.get("disputed_claims", []),
         }
         await asyncio.sleep(0.5)
 
@@ -198,8 +215,10 @@ async def _simulate_investigation(
     if is_fallback:
         summary_text = "[SIMULATED — GenLayer contract call failed, this is an off-chain estimate] " + summary_text
 
+    clean_scores = {k: v for k, v in scores.items() if not k.startswith("_")}
+
     report = {
-        "scores": scores,
+        "scores": clean_scores,
         "risk_level": risk_level,
         "simulated": True,
         "validators": validator_results,

@@ -65,6 +65,7 @@ Each investigation runs analysis across 13 independent domain sources:
 - **5 LLM batches** covering all 13 sources (avoids the 600s GenVM leader execution timeout)
 - `@staticmethod` pipeline — avoids GenVM pickling warnings from `self` capture in closures
 - `gl.vm.run_nondet_unsafe(leader_fn, validator_fn)` — leader runs the full LLM pipeline; validators check JSON shape and score ranges only
+- **Simulated fallback** — if the on-chain contract call fails, the API falls back to an off-chain simulation clearly labeled with `simulated: true`, `consensus_reached: false`, and a yellow warning banner in the UI
 
 ### Infrastructure
 - **Fly.io** — API hosting (`trustlayer-api.fly.dev`)
@@ -112,7 +113,7 @@ BREVO_API_KEY=your-brevo-key
 BREVO_SENDER_EMAIL=you@yourdomain.com
 WALLET_ENCRYPTION_KEY=<32-byte hex, e.g. openssl rand -hex 32>
 GENLAYER_STUDIO_URL=https://studio.genlayer.com
-GENLAYER_CONTRACT_ADDRESS=0xf9a024a2c4039DD9d10a6Ba329EFa69ADA279fd4
+GENLAYER_CONTRACT_ADDRESS=0x247345AAAE86aa4a117Ba074D32BFC1F1E9fEFE2
 GENLAYER_PRIVATE_KEY=<your StudioNet account private key>
 FRONTEND_URL=http://localhost:3000
 ```
@@ -173,7 +174,7 @@ fly secrets set \
   REDIS_URL=... \
   BREVO_API_KEY=... \
   WALLET_ENCRYPTION_KEY=... \
-  GENLAYER_CONTRACT_ADDRESS=0xf9a024a2c4039DD9d10a6Ba329EFa69ADA279fd4 \
+  GENLAYER_CONTRACT_ADDRESS=0x247345AAAE86aa4a117Ba074D32BFC1F1E9fEFE2 \
   GENLAYER_PRIVATE_KEY=...
 ```
 

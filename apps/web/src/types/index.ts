@@ -45,9 +45,9 @@ export interface Validator {
 
 export interface Claim {
   claim: string;
-  evidence: string;
+  evidence?: string;
   source?: string;
-  confidence: number;
+  confidence?: number;
 }
 
 export interface ReportScores {
